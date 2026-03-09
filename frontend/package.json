@@ -1,0 +1,43 @@
+{
+  "name": "ai-learning-coach-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "AI学习教练系统前端应用",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:check": "vue-tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
+    "format": "prettier --write src/"
+  },
+  "dependencies": {
+    "vue": "^3.4.15",
+    "vue-router": "^4.2.5",
+    "pinia": "^2.1.7",
+    "axios": "^1.6.5",
+    "element-plus": "^2.5.4",
+    "@element-plus/icons-vue": "^2.3.1",
+    "echarts": "^5.4.3",
+    "dayjs": "^1.11.10",
+    "markdown-it": "^14.0.0",
+    "vue-draggable-plus": "^0.3.5",
+    "nprogress": "^0.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.3",
+    "@vue/tsconfig": "^0.5.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.11",
+    "vue-tsc": "^1.8.27",
+    "sass": "^1.70.0",
+    "@types/node": "^20.11.5",
+    "@types/markdown-it": "^13.0.7",
+    "@types/nprogress": "^0.2.3",
+    "eslint": "^8.56.0",
+    "eslint-plugin-vue": "^9.20.1",
+    "prettier": "^3.2.4",
+    "unplugin-auto-import": "^0.17.3",
+    "unplugin-vue-components": "^0.26.0"
+  }
+}

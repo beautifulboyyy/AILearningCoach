@@ -1,0 +1,218 @@
+services:
+  # PostgreSQL数据库
+  db:
+    image: postgres:15-alpine
+    container_name: ai_coach_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_learning_coach}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ai_coach_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: ai_coach_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ai_coach_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Milvus Etcd
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: ai_coach_etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    networks:
+      - ai_coach_network
+
+  # Milvus MinIO
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: ai_coach_minio
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9001:9001"
+      - "9000:9000"
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - ai_coach_network
+
+  # Milvus Standalone
+  milvus-standalone:
+    image: milvusdb/milvus:v2.3.3
+    container_name: ai_coach_milvus
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      - etcd
+      - minio
+    networks:
+      - ai_coach_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+
+  # 初始化容器
+  init:
+    build: .
+    container_name: ai_coach_init
+    command: bash /app/scripts/docker_init.sh
+    volumes:
+      - .:/app
+      - init_marker:/tmp/init
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus-standalone:
+        condition: service_healthy
+    networks:
+      - ai_coach_network
+
+  # FastAPI应用
+  app:
+    build: .
+    container_name: ai_coach_app
+    entrypoint: ["/app/docker-entrypoint.sh"]
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - init_marker:/tmp/init
+    env_file:
+      - .env
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks:
+      - ai_coach_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Celery Worker
+  celery_worker:
+    build: .
+    container_name: ai_coach_celery_worker
+    entrypoint: ["/app/docker-entrypoint.sh"]
+    command: celery -A celery_app worker --loglevel=info
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - init_marker:/tmp/init
+    env_file:
+      - .env
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks:
+      - ai_coach_network
+    restart: unless-stopped
+
+  # Celery Beat（定时任务调度器）
+  celery_beat:
+    build: .
+    container_name: ai_coach_celery_beat
+    entrypoint: ["/app/docker-entrypoint.sh"]
+    command: celery -A celery_app beat --loglevel=info
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - init_marker:/tmp/init
+    env_file:
+      - .env
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks:
+      - ai_coach_network
+    restart: unless-stopped
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai_coach_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - ai_coach_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    environment:
+      - NGINX_HOST=localhost
+      - NGINX_PORT=80
+
+volumes:
+  postgres_data:
+  redis_data:
+  milvus_data:
+  etcd_data:
+  minio_data:
+  init_marker:
+
+networks:
+  ai_coach_network:
+    driver: bridge

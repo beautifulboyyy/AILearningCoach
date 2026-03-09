@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+env/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# 文档（构建时不需要）
+*.md
+!README.md
+
+# 日志
+logs/
+*.log
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 开发文件
+.env.local
+.env.*.local
+
+# 数据文件（通过volume挂载）
+data/
+uploads/
+temp/
+
+# 前端（如果有独立构建）
+frontend/node_modules/
+frontend/dist/
+
+# Docker相关
+.dockerignore
+docker-compose.override.yml
+
+# 临时文件
+*.tmp
+*.bak
+.trae/

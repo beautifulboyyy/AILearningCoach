@@ -1,0 +1,185 @@
+@import './variables.scss';
+
+// 重置样式
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif;
+  font-size: $font-size-base;
+  color: $text-primary;
+  background-color: $bg-page;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+// 滚动条样式
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.3);
+  }
+}
+
+// 通用类
+.text-center {
+  text-align: center;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.full-height {
+  height: 100%;
+}
+
+.full-width {
+  width: 100%;
+}
+
+// 卡片样式
+.card {
+  background: $bg-color;
+  border-radius: $border-radius-large;
+  box-shadow: $shadow-light;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+// 页面容器
+.page-container {
+  height: 100%;
+  overflow-y: auto;
+  padding: $spacing-lg;
+}
+
+// 表单样式
+.form-container {
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+// 按钮组
+.button-group {
+  display: flex;
+  gap: $spacing-sm;
+  align-items: center;
+}
+
+// 加载状态
+.loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 300px;
+}
+
+// 空状态
+.empty-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xl;
+  color: $text-secondary;
+}
+
+// 标签样式
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: $border-radius-small;
+  font-size: $font-size-small;
+  line-height: 1.5;
+}
+
+// 优先级颜色
+.priority-low {
+  color: $success-color;
+}
+
+.priority-medium {
+  color: $warning-color;
+}
+
+.priority-high {
+  color: $danger-color;
+}
+
+// 状态颜色
+.status-pending {
+  color: $info-color;
+}
+
+.status-in-progress {
+  color: $primary-color;
+}
+
+.status-completed {
+  color: $success-color;
+}
+
+// 动画
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-in;
+}
+
+// 响应式
+@media (max-width: 768px) {
+  .page-container {
+    padding: $spacing-md;
+  }
+
+  .card {
+    padding: $spacing-md;
+  }
+}
