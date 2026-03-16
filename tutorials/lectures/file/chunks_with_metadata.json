@@ -1,0 +1,78 @@
+[
+  {
+    "chunk_id": "doc_7292893bef26_chunk_0000",
+    "content": "人工智能简介\n\n人工智能（Artificial Intelligence，简称AI）是计算机科学的一个分支，旨在创建能够执行通常需要人类智能的任务的系统。\n\nAI的主要类型包括：\n1. 弱人工智能（Narrow AI）：专注于特定任务的AI系统，如语音识别、图像分类等。\n2. 强人工智能（General AI）：具有与人类相当的智能水平，能够执行任何智力任务。\n3. 超人工智能（Super AI）：超越人类智能水平的AI系统。\n\n目前，我们所使用的大多数AI系统都属于弱人工智能范畴。这些系统在特定领域表现出色，但无法像人类一样进行通用推理。\n\n机器学习是实现人工智能的主要方法之一，它允许计算机从数据中学习模式，而无需显式编程。深度学习作为机器学习的一个子领域，使用神经网络来模拟人脑的工作方式。",
+    "document_metadata": {
+      "doc_id": "doc_7292893bef26",
+      "title": "doc1_ai_intro",
+      "source": "../data\\doc1_ai_intro.txt",
+      "filename": "doc1_ai_intro.txt",
+      "doc_type": "txt",
+      "language": "zh",
+      "created_date": "2026-03-02T15:20:20.488857",
+      "modified_date": "2026-01-11T15:05:19"
+    },
+    "chunk_metadata": {
+      "chunk_index": 0,
+      "char_count": 351,
+      "token_count": 15,
+      "chunk_position": "1/1"
+    },
+    "content_metadata": {
+      "keywords": [
+        "ai",
+        "系统",
+        "人工智能简介",
+        "人工智能",
+        "artificial"
+      ],
+      "has_numbers": true,
+      "has_url": false,
+      "has_email": false
+    },
+    "technical_metadata": {
+      "extracted_at": "2026-03-07T16:45:11.025558",
+      "extractor_version": "1.0",
+      "chunk_size_config": 500,
+      "overlap_config": 50
+    }
+  },
+  {
+    "chunk_id": "doc_ec6455f8a9ac_chunk_0000",
+    "content": "机器学习基础\n\n机器学习是人工智能的核心技术之一，它使计算机能够从经验中学习并改进性能。\n\n机器学习的三大类型：\n\n1. 监督学习（Supervised Learning）\n   使用标注数据进行训练，模型学习输入和输出之间的映射关系。\n   应用场景：分类、回归、预测等。\n   典型算法：线性回归、逻辑回归、支持向量机、决策树、随机森林等。\n\n2. 无监督学习（Unsupervised Learning）\n   使用未标注的数据，让模型自己发现数据中的模式和结构。\n   应用场景：聚类、降维、异常检测等。\n   典型算法：K-means、层次聚类、PCA、自编码器等。\n\n3. 强化学习（Reinforcement Learning）\n   通过与环境交互，根据奖励信号学习最优策略。\n   应用场景：游戏AI、机器人控制、自动驾驶等。\n   典型算法：Q-Learning、DQN、PPO、A3C等。\n\n机器学习的工作流程通常包括：数据收集、数据预处理、特征工程、模型选择、训练、评估和部署。",
+    "document_metadata": {
+      "doc_id": "doc_ec6455f8a9ac",
+      "title": "doc2_machine_learning",
+      "source": "../data\\doc2_machine_learning.txt",
+      "filename": "doc2_machine_learning.txt",
+      "doc_type": "txt",
+      "language": "zh",
+      "created_date": "2026-03-02T15:20:20.491394",
+      "modified_date": "2026-01-11T15:05:19"
+    },
+    "chunk_metadata": {
+      "chunk_index": 0,
+      "char_count": 451,
+      "token_count": 22,
+      "chunk_position": "1/1"
+    },
+    "content_metadata": {
+      "keywords": [
+        "learning",
+        "应用场景",
+        "典型算法",
+        "机器学习基础",
+        "机器学习是人工智能的核心技术之一"
+      ],
+      "has_numbers": true,
+      "has_url": false,
+      "has_email": false
+    },
+    "technical_metadata": {
+      "extracted_at": "2026-03-07T16:45:11.025558",
+      "extractor_version": "1.0",
+      "chunk_size_config": 500,
+      "overlap_config": 50
+    }
+  }
+]

@@ -1,0 +1,155 @@
+[
+  {
+    "config": {
+      "chunk_size": 400,
+      "chunk_overlap": 40
+    },
+    "report": {
+      "summary": {
+        "total_score": 95.0,
+        "grade": "A (优秀)",
+        "total_chunks": 1,
+        "chunk_size_config": 400,
+        "overlap_config": 40
+      },
+      "semantic_integrity": {
+        "avg_score": 100.0,
+        "min_score": 100,
+        "max_score": 100,
+        "issues_count": 0,
+        "issues": [],
+        "total_chunks": 1,
+        "used_milvus": true
+      },
+      "size_distribution": {
+        "avg_length": 351.0,
+        "std_length": 0.0,
+        "min_length": 351,
+        "max_length": 351,
+        "coefficient_of_variation": 0.0,
+        "score": 100,
+        "grade": "优秀",
+        "distribution": {
+          "0-200": 0,
+          "200-400": 1,
+          "400-600": 0,
+          "600-800": 0,
+          "800+": 0
+        }
+      },
+      "overlap_effect": {
+        "message": "块数量太少，无法评估overlap"
+      },
+      "recommendations": [
+        {
+          "category": "总体",
+          "issue": "无",
+          "suggestion": "当前配置良好，建议通过实际检索测试进一步验证"
+        }
+      ],
+      "evaluated_at": "2026-03-07T16:45:11.455401"
+    }
+  },
+  {
+    "config": {
+      "chunk_size": 600,
+      "chunk_overlap": 60
+    },
+    "report": {
+      "summary": {
+        "total_score": 95.0,
+        "grade": "A (优秀)",
+        "total_chunks": 1,
+        "chunk_size_config": 600,
+        "overlap_config": 60
+      },
+      "semantic_integrity": {
+        "avg_score": 100.0,
+        "min_score": 100,
+        "max_score": 100,
+        "issues_count": 0,
+        "issues": [],
+        "total_chunks": 1,
+        "used_milvus": true
+      },
+      "size_distribution": {
+        "avg_length": 351.0,
+        "std_length": 0.0,
+        "min_length": 351,
+        "max_length": 351,
+        "coefficient_of_variation": 0.0,
+        "score": 100,
+        "grade": "优秀",
+        "distribution": {
+          "0-200": 0,
+          "200-400": 1,
+          "400-600": 0,
+          "600-800": 0,
+          "800+": 0
+        }
+      },
+      "overlap_effect": {
+        "message": "块数量太少，无法评估overlap"
+      },
+      "recommendations": [
+        {
+          "category": "总体",
+          "issue": "无",
+          "suggestion": "当前配置良好，建议通过实际检索测试进一步验证"
+        }
+      ],
+      "evaluated_at": "2026-03-07T16:45:11.460942"
+    }
+  },
+  {
+    "config": {
+      "chunk_size": 400,
+      "chunk_overlap": 0
+    },
+    "report": {
+      "summary": {
+        "total_score": 95.0,
+        "grade": "A (优秀)",
+        "total_chunks": 1,
+        "chunk_size_config": 400,
+        "overlap_config": 0
+      },
+      "semantic_integrity": {
+        "avg_score": 100.0,
+        "min_score": 100,
+        "max_score": 100,
+        "issues_count": 0,
+        "issues": [],
+        "total_chunks": 1,
+        "used_milvus": true
+      },
+      "size_distribution": {
+        "avg_length": 351.0,
+        "std_length": 0.0,
+        "min_length": 351,
+        "max_length": 351,
+        "coefficient_of_variation": 0.0,
+        "score": 100,
+        "grade": "优秀",
+        "distribution": {
+          "0-200": 0,
+          "200-400": 1,
+          "400-600": 0,
+          "600-800": 0,
+          "800+": 0
+        }
+      },
+      "overlap_effect": {
+        "message": "块数量太少，无法评估overlap"
+      },
+      "recommendations": [
+        {
+          "category": "总体",
+          "issue": "无",
+          "suggestion": "当前配置良好，建议通过实际检索测试进一步验证"
+        }
+      ],
+      "evaluated_at": "2026-03-07T16:45:11.464998"
+    }
+  }
+]

@@ -101,7 +101,7 @@ class DocumentProcessor:
         }
 
 
-async def ingest_documents(data_dir: str = "data/lectures"):
+async def ingest_documents(data_dir: str = "../data/lectures"):
     """
     导入文档到向量数据库
     
@@ -209,7 +209,7 @@ async def main():
     import sys
     
     # 获取数据目录参数
-    data_dir = sys.argv[1] if len(sys.argv) > 1 else "data/lectures"
+    data_dir = sys.argv[1] if len(sys.argv) > 1 else "../data/lectures"
     
     await ingest_documents(data_dir)
 
