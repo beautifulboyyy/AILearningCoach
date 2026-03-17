@@ -15,6 +15,7 @@ class DashScopeEmbedding:
         self.api_key = settings.DASHSCOPE_API_KEY
         self.model = settings.EMBEDDING_MODEL
         self.base_url = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
+        self.max_batch_size = 10
     
     @retry(
         stop=stop_after_attempt(3),
@@ -38,12 +39,12 @@ class DashScopeEmbedding:
         wait=wait_exponential(multiplier=1, min=2, max=10),
         reraise=True
     )
-    async def embed_texts(self, texts: List[str]) -> List[List[float]]:
+    async def _embed_batch(self, texts: List[str]) -> List[List[float]]:
         """
-        向量化多个文本
+        向量化单批文本（单次请求）
         
         Args:
-            texts: 输入文本列表
+            texts: 单批输入文本列表（长度不超过max_batch_size）
         
         Returns:
             向量表示列表
@@ -79,11 +80,28 @@ class DashScopeEmbedding:
                 return embeddings
                 
         except httpx.HTTPError as e:
-            app_logger.error(f"调用通义千问Embedding API失败: {e}")
+            response_text = ""
+            if isinstance(e, httpx.HTTPStatusError):
+                response_text = e.response.text
+            app_logger.error(f"调用通义千问Embedding API失败: {e}; 响应: {response_text[:300]}")
             raise
         except KeyError as e:
             app_logger.error(f"解析Embedding响应失败: {e}")
             raise
+
+    async def embed_texts(self, texts: List[str]) -> List[List[float]]:
+        """
+        向量化多个文本（自动分批）
+        """
+        if not texts:
+            return []
+
+        all_embeddings: List[List[float]] = []
+        for i in range(0, len(texts), self.max_batch_size):
+            batch = texts[i:i + self.max_batch_size]
+            batch_embeddings = await self._embed_batch(batch)
+            all_embeddings.extend(batch_embeddings)
+        return all_embeddings
     
     async def embed_query(self, query: str) -> List[float]:
         """
