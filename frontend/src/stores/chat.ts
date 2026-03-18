@@ -158,6 +158,17 @@ export const useChatStore = defineStore('chat', () => {
     currentSessionId.value = null
   }
 
+  // 删除会话
+  const deleteSession = async (sessionId: string) => {
+    await chatApi.deleteSession(sessionId)
+    sessions.value = sessions.value.filter(session => session.id !== sessionId)
+
+    // 如果删除的是当前会话，清空当前聊天窗口
+    if (currentSessionId.value === sessionId) {
+      createNewSession()
+    }
+  }
+
   // 获取Agent列表
   const fetchAgents = async () => {
     try {
@@ -185,6 +196,7 @@ export const useChatStore = defineStore('chat', () => {
     createNewSession,
     fetchAgents,
     fetchSessions,
+    deleteSession,
     clearMessages
   }
 })

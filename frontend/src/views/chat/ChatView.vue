@@ -25,7 +25,16 @@
               :class="{ active: currentSessionId === session.id }"
               @click="selectSession(session.id)"
             >
-              <div class="session-title">{{ session.title || '新对话' }}</div>
+              <div class="session-main">
+                <div class="session-title">{{ session.title || '新对话' }}</div>
+                <el-button
+                  class="session-delete-btn"
+                  type="danger"
+                  link
+                  :icon="Delete"
+                  @click.stop="handleDeleteSession(session.id)"
+                />
+              </div>
               <div class="session-time">{{ formatRelativeTime(session.created_at) }}</div>
             </div>
             <div v-if="sessions.length === 0" class="empty-sessions">
@@ -137,25 +146,24 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Plus, ChatDotRound, Service, UserFilled, Promotion, ChatLineRound
+  Plus, Delete, ChatDotRound, Service, UserFilled, Promotion, ChatLineRound
 } from '@element-plus/icons-vue'
 import { useChatStore } from '@/stores/chat'
 import { formatTime, formatRelativeTime } from '@/utils/format'
 import { AGENT_COLORS } from '@/utils/constants'
-import type { ChatSession } from '@/types/chat'
 
 const chatStore = useChatStore()
 
 const messagesRef = ref<HTMLElement>()
 const inputMessage = ref('')
-const sessions = ref<ChatSession[]>([])
 
 const messages = computed(() => chatStore.messages)
 const currentSessionId = computed(() => chatStore.currentSessionId)
 const agents = computed(() => chatStore.agents)
 const sending = computed(() => chatStore.sending)
+const sessions = computed(() => chatStore.sessions)
 
 const quickQuestions = [
   '什么是RAG？',
@@ -200,6 +208,27 @@ const selectSession = async (sessionId: string) => {
   }
 }
 
+const handleDeleteSession = async (sessionId: string) => {
+  try {
+    await ElMessageBox.confirm(
+      '删除后无法恢复，确定要删除这个会话吗？',
+      '删除会话',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消'
+      }
+    )
+
+    await chatStore.deleteSession(sessionId)
+    ElMessage.success('会话已删除')
+  } catch (error: any) {
+    // 用户取消不提示错误
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error?.message || '删除会话失败')
+  }
+}
+
 const handleSend = async () => {
   const message = inputMessage.value.trim()
   if (!message) return
@@ -231,7 +260,6 @@ onMounted(async () => {
   
   // 获取会话列表
   await chatStore.fetchSessions()
-  sessions.value = chatStore.sessions
 })
 </script>
 
@@ -290,6 +318,23 @@ onMounted(async () => {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      .session-main {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .session-delete-btn {
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+
+      &:hover .session-delete-btn,
+      &.active .session-delete-btn {
+        opacity: 1;
       }
       
       .session-time {

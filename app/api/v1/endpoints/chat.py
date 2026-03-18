@@ -662,6 +662,39 @@ async def get_chat_sessions(
     return {"sessions": sessions, "total": len(sessions)}
 
 
+@router.delete("/sessions/{session_id}")
+async def delete_chat_session(
+    session_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    删除用户的某个会话（级联删除消息）
+    """
+    result = await db.execute(
+        select(Conversation).filter(
+            Conversation.session_id == session_id,
+            Conversation.user_id == current_user.id
+        )
+    )
+    conversation = result.scalar_one_or_none()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在"
+        )
+
+    await db.delete(conversation)
+    await db.commit()
+
+    app_logger.info(
+        f"用户 {current_user.username} 删除会话成功: session_id={session_id}, "
+        f"conversation_id={conversation.id}"
+    )
+    return {"message": "会话已删除", "session_id": session_id}
+
+
 @router.get("/history/{session_id}", response_model=ChatHistory)
 async def get_chat_history(
     session_id: str,
