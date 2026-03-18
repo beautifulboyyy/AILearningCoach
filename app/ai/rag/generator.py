@@ -4,7 +4,7 @@ RAG答案生成器模块
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from app.ai.rag.retriever import rag_retriever
 from app.ai.rag.llm import llm
-from app.ai.prompts.system_prompts import get_rag_prompt_with_context
+from app.ai.prompts.system_prompts import RAG_QA_SYSTEM_PROMPT
 from app.utils.logger import app_logger
 
 
@@ -19,6 +19,8 @@ class RAGGenerator:
         self,
         query: str,
         user_profile: Optional[Dict[str, Any]] = None,
+        conversation_messages: Optional[List[Dict[str, str]]] = None,
+        extra_context: Optional[str] = None,
         top_k: int = 3,
         temperature: float = 0.7,
         max_tokens: int = 2000,
@@ -30,6 +32,8 @@ class RAGGenerator:
         Args:
             query: 用户问题
             user_profile: 用户画像
+            conversation_messages: 最近对话历史
+            extra_context: 会话级补充上下文（短期记忆、摘要等）
             top_k: 检索结果数量
             temperature: 生成温度
             max_tokens: 最大token数
@@ -61,16 +65,18 @@ class RAGGenerator:
         # 2. 格式化上下文
         context = self.retriever.format_context(retrieval_results)
         
-        # 3. 构建Prompt
-        prompt = get_rag_prompt_with_context(
+        # 3. 组装messages
+        messages = self._build_messages(
             query=query,
-            context=context,
-            user_profile=user_profile
+            knowledge_context=context,
+            user_profile=user_profile,
+            conversation_messages=conversation_messages,
+            extra_context=extra_context
         )
-        
+
         # 4. 生成答案
         answer = await self.llm.generate(
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             temperature=temperature,
             max_tokens=max_tokens
         )
@@ -93,6 +99,8 @@ class RAGGenerator:
         self,
         query: str,
         user_profile: Optional[Dict[str, Any]] = None,
+        conversation_messages: Optional[List[Dict[str, str]]] = None,
+        extra_context: Optional[str] = None,
         top_k: int = 3,
         temperature: float = 0.7,
         max_tokens: int = 2000,
@@ -104,6 +112,8 @@ class RAGGenerator:
         Args:
             query: 用户问题
             user_profile: 用户画像
+            conversation_messages: 最近对话历史
+            extra_context: 会话级补充上下文（短期记忆、摘要等）
             top_k: 检索结果数量
             temperature: 生成温度
             max_tokens: 最大token数
@@ -144,12 +154,16 @@ class RAGGenerator:
             }
             await asyncio.sleep(0)
 
-            fallback_prompt = f"""用户问题: {query}
-
-请基于你的通用知识回答这个问题。回答要简洁、准确、有帮助。"""
+            fallback_messages = self._build_messages(
+                query=query,
+                knowledge_context="",
+                user_profile=user_profile,
+                conversation_messages=conversation_messages,
+                extra_context=(extra_context or "").strip()
+            )
 
             async for chunk in self.llm.generate_stream(
-                messages=[{"role": "user", "content": fallback_prompt}],
+                messages=fallback_messages,
                 temperature=temperature,
                 max_tokens=max_tokens
             ):
@@ -189,16 +203,18 @@ class RAGGenerator:
         # 5. 格式化上下文
         context = self.retriever.format_context(retrieval_results)
 
-        # 6. 构建Prompt
-        prompt = get_rag_prompt_with_context(
+        # 6. 组装messages
+        messages = self._build_messages(
             query=query,
-            context=context,
-            user_profile=user_profile
+            knowledge_context=context,
+            user_profile=user_profile,
+            conversation_messages=conversation_messages,
+            extra_context=extra_context
         )
 
         # 7. 流式生成答案
         async for chunk in self.llm.generate_stream(
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             temperature=temperature,
             max_tokens=max_tokens
         ):
@@ -249,6 +265,46 @@ class RAGGenerator:
             })
         
         return sources
+
+    def _build_messages(
+        self,
+        query: str,
+        knowledge_context: str,
+        user_profile: Optional[Dict[str, Any]] = None,
+        conversation_messages: Optional[List[Dict[str, str]]] = None,
+        extra_context: Optional[str] = None
+    ) -> List[Dict[str, str]]:
+        """
+        构建结构化messages：system + history + current user。
+        """
+        system_parts = [RAG_QA_SYSTEM_PROMPT]
+
+        if user_profile:
+            system_parts.append(
+                "## 学习者信息\n"
+                f"- 背景：{user_profile.get('occupation', '未知')}\n"
+                f"- 技术水平：{user_profile.get('current_level', {})}\n"
+                f"- 学习目标：{user_profile.get('learning_goal', '未知')}\n"
+            )
+
+        if extra_context:
+            system_parts.append(f"## 会话补充上下文\n{extra_context}")
+
+        if knowledge_context:
+            system_parts.append(f"## 课程知识内容\n{knowledge_context}")
+
+        system_parts.append("回答时请优先依据课程知识内容，必要时补充通用知识。")
+        system_content = "\n\n".join(system_parts)
+
+        messages: List[Dict[str, str]] = [{"role": "system", "content": system_content}]
+        if conversation_messages:
+            for message in conversation_messages:
+                role = message.get("role")
+                content = message.get("content")
+                if role in {"user", "assistant", "system"} and isinstance(content, str) and content.strip():
+                    messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": query})
+        return messages
 
 
 # 全局生成器实例

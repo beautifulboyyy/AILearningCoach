@@ -3,6 +3,7 @@
 """
 from typing import Dict, Any
 from app.ai.agents.base import BaseAgent
+from app.ai.agents.message_builder import build_agent_messages
 from app.ai.rag.llm import llm
 from app.ai.prompts.system_prompts import PROJECT_COACH_SYSTEM_PROMPT
 from app.utils.logger import app_logger
@@ -56,15 +57,17 @@ class CoachAgent(BaseAgent):
 
 {profile_info}
 
-## 学习者问题
-{user_input}
-
 请提供具体的项目指导建议。
 """
+            messages = build_agent_messages(
+                system_prompt=coach_prompt,
+                user_input=user_input,
+                context=context
+            )
             
             # 生成指导建议
             response = await self.llm.generate(
-                messages=[{"role": "user", "content": coach_prompt}],
+                messages=messages,
                 temperature=0.7,
                 max_tokens=1500
             )

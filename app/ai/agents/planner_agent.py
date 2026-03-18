@@ -3,6 +3,7 @@
 """
 from typing import Dict, Any
 from app.ai.agents.base import BaseAgent
+from app.ai.agents.message_builder import build_agent_messages
 from app.ai.rag.llm import llm
 from app.ai.prompts.system_prompts import LEARNING_PLANNER_SYSTEM_PROMPT
 from app.utils.logger import app_logger
@@ -67,15 +68,17 @@ class PlannerAgent(BaseAgent):
 {profile_info}
 {progress_info}
 
-## 用户需求
-{user_input}
-
 请根据用户的背景、进度和需求，提供学习规划建议。
 """
+            messages = build_agent_messages(
+                system_prompt=planning_prompt,
+                user_input=user_input,
+                context=context
+            )
             
             # 生成规划建议
             response = await self.llm.generate(
-                messages=[{"role": "user", "content": planning_prompt}],
+                messages=messages,
                 temperature=0.7,
                 max_tokens=1500
             )

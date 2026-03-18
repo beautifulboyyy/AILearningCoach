@@ -5,13 +5,18 @@ from celery_app import celery_app
 from app.db.session import async_session_maker
 from app.ai.memory.manager import memory_manager
 from app.services.progress_service import progress_service
+from app.services.conversation_summary_service import conversation_summary_service
 from app.utils.logger import app_logger
 import asyncio
 
 
 def run_async(coro):
     """运行异步函数的辅助函数"""
-    loop = asyncio.get_event_loop()
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
     return loop.run_until_complete(coro)
 
 
@@ -195,5 +200,24 @@ def update_learning_progress_from_conversation(
             app_logger.error(f"❌ 对话触发进度更新失败: {e}")
             # 不重新抛出异常，因为这是一个非关键任务
             return None
+
+    return run_async(_update())
+
+
+@celery_app.task(name="app.tasks.async_tasks.update_conversation_summary")
+def update_conversation_summary(conversation_id: int, session_id: str):
+    """
+    异步更新会话摘要（Redis热摘要 + PostgreSQL持久摘要）
+
+    Args:
+        conversation_id: 会话ID
+        session_id: 会话session_id
+    """
+    async def _update():
+        return await conversation_summary_service.update_conversation_summary(
+            conversation_id=conversation_id,
+            session_id=session_id,
+            message_limit=20
+        )
 
     return run_async(_update())

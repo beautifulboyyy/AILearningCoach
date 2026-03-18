@@ -3,6 +3,7 @@
 """
 from typing import Dict, Any, AsyncGenerator
 from app.ai.agents.base import BaseAgent
+from app.ai.agents.message_builder import normalize_history, build_context_note
 from app.ai.rag.generator import rag_generator
 from app.utils.logger import app_logger
 
@@ -41,11 +42,15 @@ class QAAgent(BaseAgent):
 
             # 从上下文中获取用户画像
             user_profile = context.get("user_profile")
+            recent_history = normalize_history(context.get("recent_history"))
+            context_note = build_context_note(context)
 
             # 调用RAG系统生成答案
             result = await self.rag.generate(
                 query=user_input,
                 user_profile=user_profile,
+                conversation_messages=recent_history,
+                extra_context=context_note,
                 top_k=3,
                 temperature=0.7
             )
@@ -91,6 +96,8 @@ class QAAgent(BaseAgent):
 
             # 从上下文中获取用户画像
             user_profile = context.get("user_profile")
+            recent_history = normalize_history(context.get("recent_history"))
+            context_note = build_context_note(context)
 
             import asyncio
 
@@ -106,6 +113,8 @@ class QAAgent(BaseAgent):
             async for chunk in self.rag.generate_stream(
                 query=user_input,
                 user_profile=user_profile,
+                conversation_messages=recent_history,
+                extra_context=context_note,
                 top_k=3,
                 temperature=0.7
             ):

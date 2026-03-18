@@ -3,6 +3,7 @@
 """
 from typing import Dict, Any
 from app.ai.agents.base import BaseAgent
+from app.ai.agents.message_builder import build_agent_messages
 from app.ai.rag.llm import llm
 from app.ai.prompts.system_prompts import PROGRESS_ANALYST_SYSTEM_PROMPT
 from app.utils.logger import app_logger
@@ -63,15 +64,17 @@ class AnalystAgent(BaseAgent):
 {progress_info}
 {activities_info}
 
-## 用户请求
-{user_input}
-
 请分析学习数据，提供洞察和建议。
 """
+            messages = build_agent_messages(
+                system_prompt=analyst_prompt,
+                user_input=user_input,
+                context=context
+            )
             
             # 生成分析报告
             response = await self.llm.generate(
-                messages=[{"role": "user", "content": analyst_prompt}],
+                messages=messages,
                 temperature=0.7,
                 max_tokens=1500
             )

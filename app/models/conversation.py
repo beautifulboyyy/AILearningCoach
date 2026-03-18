@@ -26,6 +26,8 @@ class Conversation(Base, TimestampMixin):
     started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     ended_at = Column(DateTime, nullable=True)
     message_count = Column(Integer, default=0, nullable=False)
+    summary = Column(Text, nullable=True)
+    summary_updated_at = Column(DateTime, nullable=True)
     
     # 关系
     user = relationship("User", back_populates="conversations")
