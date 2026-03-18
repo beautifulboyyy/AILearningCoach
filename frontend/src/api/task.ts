@@ -5,7 +5,16 @@ import type { Task, CreateTaskData, UpdateTaskData, TaskQueryParams, TaskListRes
 export const taskApi = {
   // 获取任务列表
   getTasks(params?: TaskQueryParams): Promise<TaskListResponse> {
-    return request.get('/api/v1/tasks/', { params })
+    const queryParams = { ...(params || {}) } as any
+    if (queryParams.status) {
+      queryParams.status_filter = queryParams.status
+      delete queryParams.status
+    }
+    if (typeof queryParams.skip === 'number') {
+      queryParams.offset = queryParams.skip
+      delete queryParams.skip
+    }
+    return request.get('/api/v1/tasks/', { params: queryParams })
   },
 
   // 创建任务

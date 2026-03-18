@@ -13,6 +13,7 @@
         <el-radio-button label="todo">待开始</el-radio-button>
         <el-radio-button label="in_progress">进行中</el-radio-button>
         <el-radio-button label="completed">已完成</el-radio-button>
+        <el-radio-button label="cancelled">已取消</el-radio-button>
       </el-radio-group>
       <el-input
         v-model="searchKeyword"
@@ -24,7 +25,7 @@
     </div>
 
     <el-row :gutter="24" class="board-row" v-loading="loading">
-      <el-col :xs="24" :lg="8">
+      <el-col :xs="24" :lg="6">
         <el-card class="task-column">
           <template #header>
             <span class="column-title">待开始 ({{ pendingTasks.length }})</span>
@@ -37,13 +38,14 @@
               @edit="handleEdit"
               @delete="handleDelete"
               @complete="handleComplete"
+              @status-change="handleStatusChange"
             />
             <el-empty v-if="filteredPendingTasks.length === 0" description="暂无任务" />
           </div>
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :lg="8">
+      <el-col :xs="24" :lg="6">
         <el-card class="task-column">
           <template #header>
             <span class="column-title">进行中 ({{ inProgressTasks.length }})</span>
@@ -56,13 +58,14 @@
               @edit="handleEdit"
               @delete="handleDelete"
               @complete="handleComplete"
+              @status-change="handleStatusChange"
             />
             <el-empty v-if="filteredInProgressTasks.length === 0" description="暂无任务" />
           </div>
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :lg="8">
+      <el-col :xs="24" :lg="6">
         <el-card class="task-column">
           <template #header>
             <span class="column-title">已完成 ({{ completedTasks.length }})</span>
@@ -76,6 +79,25 @@
               @delete="handleDelete"
             />
             <el-empty v-if="filteredCompletedTasks.length === 0" description="暂无任务" />
+          </div>
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :lg="6">
+        <el-card class="task-column">
+          <template #header>
+            <span class="column-title">已取消 ({{ cancelledTasks.length }})</span>
+          </template>
+          <div class="task-list">
+            <TaskCard
+              v-for="task in filteredCancelledTasks"
+              :key="task.id"
+              :task="task"
+              @edit="handleEdit"
+              @delete="handleDelete"
+              @status-change="handleStatusChange"
+            />
+            <el-empty v-if="filteredCancelledTasks.length === 0" description="暂无任务" />
           </div>
         </el-card>
       </el-col>
@@ -116,10 +138,12 @@ const loading = computed(() => taskStore.loading)
 const pendingTasks = computed(() => taskStore.pendingTasks)
 const inProgressTasks = computed(() => taskStore.inProgressTasks)
 const completedTasks = computed(() => taskStore.completedTasks)
+const cancelledTasks = computed(() => taskStore.cancelledTasks)
 
 const filteredPendingTasks = computed(() => filterTasks(pendingTasks.value))
 const filteredInProgressTasks = computed(() => filterTasks(inProgressTasks.value))
 const filteredCompletedTasks = computed(() => filterTasks(completedTasks.value))
+const filteredCancelledTasks = computed(() => filterTasks(cancelledTasks.value))
 
 const filterTasks = (tasks: any[]) => {
   let result = tasks
@@ -132,7 +156,11 @@ const filterTasks = (tasks: any[]) => {
 }
 
 const fetchTasks = async () => {
-  await taskStore.fetchTasks()
+  const params: any = {}
+  if (filterStatus.value) {
+    params.status = filterStatus.value
+  }
+  await taskStore.fetchTasks(params)
 }
 
 const handleCreate = async (data: any) => {
@@ -179,6 +207,16 @@ const handleComplete = async (id: string | number) => {
     ElMessage.success('任务已完成')
   } catch (error) {
     ElMessage.error('操作失败')
+  }
+}
+
+const handleStatusChange = async (payload: { id: string | number; status: string }) => {
+  try {
+    await taskStore.changeTaskStatus(payload.id, payload.status as any)
+    ElMessage.success('任务状态已更新')
+    await fetchTasks()
+  } catch (error) {
+    ElMessage.error('状态更新失败')
   }
 }
 

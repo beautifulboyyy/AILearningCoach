@@ -22,6 +22,10 @@ export const useTaskStore = defineStore('task', () => {
     tasks.value.filter(t => t.status === 'completed')
   )
 
+  const cancelledTasks = computed(() =>
+    tasks.value.filter(t => t.status === 'cancelled')
+  )
+
   // 获取任务列表
   const fetchTasks = async (params?: any) => {
     loading.value = true
@@ -82,6 +86,7 @@ export const useTaskStore = defineStore('task', () => {
     pendingTasks,
     inProgressTasks,
     completedTasks,
+    cancelledTasks,
     fetchTasks,
     createTask,
     updateTask,

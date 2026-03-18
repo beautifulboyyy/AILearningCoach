@@ -45,12 +45,13 @@ export interface UpdateProgressRequest {
 export interface WeeklyReport {
   week_start: string
   week_end: string
-  total_hours: number
-  completed_tasks: number
-  summary: string
-  highlights?: string[]
-  daily_hours?: Record<string, number> // 每日学习时长，例如 {"2024-01-22": 2.5}
-  module_progress?: Record<string, number>
+  study_hours: number
+  completed_modules: string[]
+  questions_asked: number
+  tasks_completed: number
+  difficulty_points: string[]
+  suggestions: string[]
+  daily_hours?: Record<string, number>
 }
 
 export interface StudyRecord {

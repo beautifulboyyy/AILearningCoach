@@ -15,6 +15,24 @@ import re
 
 class LearningPathService:
     """学习路径服务"""
+
+    GOAL_FOCUS = {
+        "job_hunting": ["Prompt工程", "RAG系统", "Agent开发", "综合项目"],
+        "project": ["Prompt工程", "Function Calling", "RAG系统", "Agent开发", "综合项目"],
+        "systematic_learning": ["Prompt工程", "Function Calling", "RAG系统", "Agent开发", "MCP", "综合项目"],
+        "skill_improvement": ["Prompt工程", "RAG系统", "Agent开发", "综合项目"],
+        "hobby_learning": ["Prompt工程", "RAG系统", "综合项目"],
+        "exam_preparation": ["Prompt工程", "Function Calling", "RAG系统", "Agent开发"],
+    }
+
+    MODULE_LIBRARY = {
+        "Prompt工程": ["讲03-Prompt基础", "讲04-中级Prompt", "讲05-高级Prompt"],
+        "Function Calling": ["讲06-Prompt实战", "讲07-Prompt工程化"],
+        "RAG系统": ["讲08-Embedding", "讲09-向量数据库", "讲10-检索", "讲11-RAG基础", "讲12-RAG进阶"],
+        "Agent开发": ["讲15-Agent基础", "讲16-Tool Use", "讲17-多Agent"],
+        "MCP": ["讲18-Agent框架", "讲19-Agent实战"],
+        "综合项目": ["讲20-综合项目"],
+    }
     
     async def generate_learning_path(
         self,
@@ -46,58 +64,50 @@ class LearningPathService:
             )
             profile = result.scalar_one_or_none()
             
-            # 构建规划请求Prompt
+            # 1) 先构建规则化计划骨架（保证不会固定死模板）
+            base_plan = self._build_rule_based_plan(
+                learning_goal=learning_goal,
+                available_hours=available_hours,
+                prior_knowledge=prior_knowledge,
+                profile=profile
+            )
+
+            # 2) 使用LLM在骨架上润色（失败则回退骨架）
             profile_info = ""
             if profile:
-                profile_info = f"""
-## 用户背景
-- 职业：{profile.occupation or '未知'}
-- 技术背景：{json.dumps(profile.technical_background or {}, ensure_ascii=False)}
-- 当前水平：{json.dumps(profile.current_level or {}, ensure_ascii=False)}
+                profile_info = (
+                    f"职业：{profile.occupation or '未知'}；"
+                    f"技术背景：{json.dumps(profile.technical_background or {}, ensure_ascii=False)}；"
+                    f"当前水平：{json.dumps(profile.current_level or {}, ensure_ascii=False)}"
+                )
+
+            planning_prompt = f"""请基于下面学习路径骨架，输出更自然且可执行的学习路径JSON。
+要求：
+1. 保留 phases 的先后逻辑，不要删除核心阶段
+2. 可微调阶段标题/目标/模块细节
+3. 输出必须是 JSON，字段保持 title/description/phases
+
+学习目标：{learning_goal}
+每周可用时长：{available_hours}小时
+用户画像：{profile_info or "未知"}
+已有知识：{json.dumps(prior_knowledge or {}, ensure_ascii=False)}
+
+骨架JSON：
+{json.dumps(base_plan, ensure_ascii=False)}
 """
-            
-            prior_info = ""
-            if prior_knowledge:
-                prior_info = f"\n已有知识：{json.dumps(prior_knowledge, ensure_ascii=False)}"
-            
-            # 简化Prompt以减少生成时间（P0优化：从2000 tokens减少到800 tokens）
-            planning_prompt = f"""生成学习路径（JSON格式，简洁回答）：
 
-目标：{learning_goal}
-每周时间：{available_hours}小时
-{prior_info}
-
-模块：1.Prompt工程 2.Function Calling 3.RAG系统 4.Agent开发 5.MCP
-
-返回JSON（不超过500字）：
-{{
-    "title": "路径标题",
-    "description": "简短描述",
-    "total_weeks": 8,
-    "phases": [
-        {{"phase": 1, "weeks": "1-2", "title": "阶段1", "modules": ["讲03-07"], "goal": "目标"}},
-        {{"phase": 2, "weeks": "3-4", "title": "阶段2", "modules": ["讲08-10"], "goal": "目标"}}
-    ]
-}}
-
-只返回JSON。"""
-            
-            # 调用LLM生成规划（减少max_tokens以加快响应）
-            response = await llm.generate(
-                messages=[{"role": "user", "content": planning_prompt}],
-                temperature=0.5,  # 降低temperature以加快生成
-                max_tokens=800  # 从2000减少到800，大幅提升速度
-            )
-            
-            # 解析JSON
-            json_match = re.search(r'```json\n(.*?)\n```', response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                # 尝试直接解析
-                json_str = response.strip()
-            
-            learning_plan = json.loads(json_str)
+            learning_plan = base_plan
+            try:
+                response = await llm.generate(
+                    messages=[{"role": "user", "content": planning_prompt}],
+                    temperature=0.6,
+                    max_tokens=1200
+                )
+                parsed_plan = self._parse_learning_plan(response)
+                if parsed_plan and parsed_plan.get("phases"):
+                    learning_plan = parsed_plan
+            except Exception as llm_error:
+                app_logger.warning(f"LLM润色学习路径失败，使用规则化结果: {llm_error}")
             
             # 创建学习路径
             learning_path = LearningPath(
@@ -122,6 +132,76 @@ class LearningPathService:
         except Exception as e:
             app_logger.error(f"生成学习路径失败: {e}")
             raise
+
+    def _parse_learning_plan(self, response: str) -> Optional[Dict[str, Any]]:
+        """
+        尝试从LLM响应中解析学习路径JSON。
+        """
+        try:
+            json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(1))
+            return json.loads(response.strip())
+        except Exception:
+            return None
+
+    def _build_rule_based_plan(
+        self,
+        learning_goal: str,
+        available_hours: int,
+        prior_knowledge: Optional[Dict[str, Any]] = None,
+        profile: Optional[UserProfile] = None
+    ) -> Dict[str, Any]:
+        """
+        基于目标和可用时长生成动态学习路径骨架。
+        """
+        goal_key = learning_goal if learning_goal in self.GOAL_FOCUS else "systematic_learning"
+        focus_topics = self.GOAL_FOCUS[goal_key]
+
+        # 根据每周时长动态设置总周数
+        if available_hours <= 6:
+            total_weeks = 12
+        elif available_hours <= 10:
+            total_weeks = 10
+        elif available_hours <= 16:
+            total_weeks = 8
+        else:
+            total_weeks = 6
+
+        phase_count = min(max(3, len(focus_topics)), 5)
+        topics_for_plan = focus_topics[:phase_count]
+
+        phases: List[Dict[str, Any]] = []
+        start_week = 1
+        weeks_per_phase = max(1, total_weeks // phase_count)
+
+        for idx, topic in enumerate(topics_for_plan, start=1):
+            end_week = start_week + weeks_per_phase - 1
+            if idx == phase_count:
+                end_week = total_weeks
+
+            modules = self.MODULE_LIBRARY.get(topic, [topic])
+            phases.append({
+                "phase": idx,
+                "weeks": f"{start_week}-{end_week}",
+                "title": f"{topic}阶段",
+                "modules": modules,
+                "goal": f"掌握{topic}的核心能力，并完成对应练习"
+            })
+            start_week = end_week + 1
+
+        title = f"{goal_key.replace('_', ' ').title()} 学习路径"
+        description = (
+            f"基于每周{available_hours}小时的可用时间制定，"
+            f"覆盖{', '.join(topics_for_plan)}等核心能力。"
+        )
+
+        return {
+            "title": title,
+            "description": description,
+            "total_weeks": total_weeks,
+            "phases": phases
+        }
     
     async def get_learning_path(
         self,

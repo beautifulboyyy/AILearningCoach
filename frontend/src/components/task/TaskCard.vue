@@ -7,8 +7,17 @@
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="edit">编辑</el-dropdown-item>
-            <el-dropdown-item command="complete" v-if="task.status !== 'completed'">
+            <el-dropdown-item command="start" v-if="task.status === 'todo'">
+              开始
+            </el-dropdown-item>
+            <el-dropdown-item command="resume" v-if="task.status === 'cancelled'">
+              恢复
+            </el-dropdown-item>
+            <el-dropdown-item command="complete" v-if="task.status !== 'completed' && task.status !== 'cancelled'">
               完成
+            </el-dropdown-item>
+            <el-dropdown-item command="cancel" v-if="task.status !== 'completed' && task.status !== 'cancelled'">
+              取消
             </el-dropdown-item>
             <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
           </el-dropdown-menu>
@@ -33,7 +42,7 @@ import { formatDate } from '@/utils/format'
 import { PRIORITY_OPTIONS } from '@/utils/constants'
 
 const props = defineProps<{ task: any }>()
-const emit = defineEmits(['edit', 'delete', 'complete'])
+const emit = defineEmits(['edit', 'delete', 'complete', 'status-change'])
 
 const getPriorityType = (priority: string) => {
   const map: Record<string, any> = {
@@ -57,6 +66,12 @@ const handleCommand = (command: string) => {
     emit('delete', props.task.id)
   } else if (command === 'complete') {
     emit('complete', props.task.id)
+  } else if (command === 'start') {
+    emit('status-change', { id: props.task.id, status: 'in_progress' })
+  } else if (command === 'resume') {
+    emit('status-change', { id: props.task.id, status: 'todo' })
+  } else if (command === 'cancel') {
+    emit('status-change', { id: props.task.id, status: 'cancelled' })
   }
 }
 </script>

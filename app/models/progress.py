@@ -85,7 +85,13 @@ class ProgressHistory(Base):
     new_status = Column(SQLEnum(ProgressStatus), nullable=True)  # 变更后状态
 
     # 触发信息
-    trigger_type = Column(SQLEnum(ProgressTriggerType), nullable=False)  # 触发类型
+    trigger_type = Column(
+        SQLEnum(
+            ProgressTriggerType,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls]
+        ),
+        nullable=False
+    )  # 触发类型（使用枚举value: manual/time/...）
     trigger_source = Column(String(200), nullable=True)  # 触发来源（如 conversation_id）
     trigger_detail = Column(Text, nullable=True)  # 触发详情（JSON格式的额外信息）
 

@@ -131,11 +131,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { Timer, CircleCheck, TrendCharts, DataAnalysis } from '@element-plus/icons-vue'
-import { progressApi, taskApi, learningPathApi } from '@/api'
+import { progressApi, taskApi } from '@/api'
 import { formatDate, formatRelativeTime } from '@/utils/format'
 import { PRIORITY_OPTIONS } from '@/utils/constants'
 import type { ProgressStats } from '@/types/progress'
@@ -154,9 +154,10 @@ const upcomingTasks = ref<Task[]>([])
 const tasksLoading = ref(false)
 const recentActivities = ref<any[]>([])
 const weeklyStudyData = ref<number[]>([0, 0, 0, 0, 0, 0, 0])
+const refreshTimer = ref<number | null>(null)
 
-const currentPhase = computed(() => stats.value.current_phase || '暂无')
-const weeklyProgress = computed(() => stats.value.weekly_progress || 0)
+const currentPhase = computed(() => stats.value.current_module || '暂无')
+const weeklyProgress = computed(() => Math.round(stats.value.overall_completion || 0))
 
 // 获取统计数据
 const fetchStats = async () => {
@@ -175,10 +176,7 @@ const fetchWeeklyData = async () => {
     if (report.daily_hours) {
       // 将每日学习时长数据转换为数组格式
       const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-      weeklyStudyData.value = days.map((_, index) => {
-        const dayKey = Object.keys(report.daily_hours || {})[index]
-        return report.daily_hours?.[dayKey] || 0
-      })
+      weeklyStudyData.value = days.map((day) => report.daily_hours?.[day] || 0)
     }
   } catch (error) {
     console.error('Failed to fetch weekly data:', error)
@@ -213,8 +211,18 @@ const fetchRecentActivities = async () => {
 const fetchUpcomingTasks = async () => {
   tasksLoading.value = true
   try {
-    const res = await taskApi.getTasks({ status: 'pending', limit: 5 })
-    upcomingTasks.value = res.tasks?.slice(0, 5) || []
+    const [todoRes, progressRes] = await Promise.all([
+      taskApi.getTasks({ status: 'todo', limit: 5 }),
+      taskApi.getTasks({ status: 'in_progress', limit: 5 })
+    ])
+    const merged = [...(progressRes.tasks || []), ...(todoRes.tasks || [])]
+    upcomingTasks.value = merged
+      .sort((a, b) => {
+        const aTime = a.due_date ? new Date(a.due_date).getTime() : Number.MAX_SAFE_INTEGER
+        const bTime = b.due_date ? new Date(b.due_date).getTime() : Number.MAX_SAFE_INTEGER
+        return aTime - bTime
+      })
+      .slice(0, 5)
   } catch (error) {
     console.error('Failed to fetch tasks:', error)
   } finally {
@@ -317,6 +325,18 @@ onMounted(async () => {
   nextTick(() => {
     initChart()
   })
+
+  // 定时刷新面板数据，避免长驻页面时数据显示陈旧
+  refreshTimer.value = window.setInterval(async () => {
+    await Promise.all([fetchStats(), fetchUpcomingTasks(), fetchRecentActivities()])
+  }, 30000)
+})
+
+onBeforeUnmount(() => {
+  if (refreshTimer.value) {
+    clearInterval(refreshTimer.value)
+    refreshTimer.value = null
+  }
 })
 </script>
 

@@ -83,6 +83,14 @@ class RecordActivityResponse(BaseModel):
     message: str
 
 
+class ModuleProgressUpdateRequest(BaseModel):
+    """按模块key更新进度请求"""
+    status: Optional[ProgressStatus] = Field(None, description="目标状态")
+    completion_percentage: Optional[float] = Field(None, ge=0, le=100, description="目标完成百分比")
+    actual_hours: Optional[float] = Field(None, ge=0, description="实际学习时长")
+    notes: Optional[str] = Field(None, description="学习备注")
+
+
 class WeeklyTrend(BaseModel):
     """周进度趋势"""
     week: str = Field(..., description="周标识，如W1、W2")
@@ -117,6 +125,7 @@ class WeeklyReportResponse(BaseModel):
     tasks_completed: int = Field(..., description="完成的任务数")
     difficulty_points: List[str] = Field(..., description="困难点")
     suggestions: List[str] = Field(..., description="改进建议")
+    daily_hours: Dict[str, float] = Field(default_factory=dict, description="本周每日学习时长")
 
 
 class MonthlyReportResponse(BaseModel):

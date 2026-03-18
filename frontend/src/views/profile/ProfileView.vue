@@ -5,8 +5,11 @@
         <el-card>
           <template #header>
             <div class="card-header">
-              <span>用户画像</span>
-              <el-button type="primary" @click="handleSave">保存</el-button>
+            <span>用户画像</span>
+              <div style="display: flex; gap: 8px;">
+                <el-button @click="fetchProgressStats" :loading="statsLoading">刷新统计</el-button>
+                <el-button type="primary" @click="handleSave">保存</el-button>
+              </div>
             </div>
           </template>
 
@@ -125,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { profileApi, progressApi } from '@/api'
 import { LEARNING_GOAL_OPTIONS, LEARNING_STYLE_OPTIONS } from '@/utils/constants'
@@ -150,6 +153,7 @@ const form = reactive({
 })
 
 const progressStats = ref<Partial<ProgressStats>>({})
+const refreshTimer = ref<number | null>(null)
 
 // 进度条颜色配置
 const progressColors = [
@@ -196,6 +200,7 @@ const fetchProgressStats = async () => {
 const handleSave = async () => {
   try {
     await profileApi.updateProfile(form)
+    await fetchProgressStats()
     ElMessage.success('保存成功')
   } catch (error) {
     ElMessage.error('保存失败')
@@ -224,6 +229,16 @@ const removeTag = (index: number) => {
 onMounted(() => {
   fetchProfile()
   fetchProgressStats()
+  refreshTimer.value = window.setInterval(() => {
+    fetchProgressStats()
+  }, 30000)
+})
+
+onBeforeUnmount(() => {
+  if (refreshTimer.value) {
+    clearInterval(refreshTimer.value)
+    refreshTimer.value = null
+  }
 })
 </script>
 

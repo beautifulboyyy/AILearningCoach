@@ -117,13 +117,12 @@ class ProgressService:
         week_start = now - timedelta(days=now.weekday())
         week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # 获取本周完成的任务数
+        # 获取累计完成任务数（用于首页/统计面板）
         result = await db.execute(
             select(func.count(Task.id)).filter(
                 and_(
                     Task.user_id == user_id,
-                    Task.status == TaskStatus.COMPLETED,
-                    Task.completed_at >= week_start
+                    Task.status == TaskStatus.COMPLETED
                 )
             )
         )
@@ -324,6 +323,7 @@ class ProgressService:
         
         # 简化的学习时长估算（基于对话数量）
         study_hours = questions_asked * 0.5  # 假设每个问题平均30分钟
+        daily_hours = await self._get_daily_study_hours(user_id, db, week_start, week_end)
         
         return {
             "week_start": week_start,
@@ -333,7 +333,8 @@ class ProgressService:
             "questions_asked": questions_asked,
             "tasks_completed": tasks_completed,
             "difficulty_points": [],  # 需要分析高频问题
-            "suggestions": ["继续保持学习节奏", "多做实践练习"]
+            "suggestions": ["继续保持学习节奏", "多做实践练习"],
+            "daily_hours": daily_hours
         }
 
 

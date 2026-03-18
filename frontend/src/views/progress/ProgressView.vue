@@ -127,7 +127,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ArrowRight } from '@element-plus/icons-vue'
 import { progressApi } from '@/api'
@@ -144,6 +144,7 @@ const historyLoading = ref(false)
 
 let weeklyChart: echarts.ECharts | null = null
 let trendChart: echarts.ECharts | null = null
+const refreshTimer = ref<number | null>(null)
 
 const fetchStats = async () => {
   loading.value = true
@@ -336,6 +337,20 @@ onMounted(async () => {
   nextTick(() => {
     initCharts()
   })
+
+  refreshTimer.value = window.setInterval(async () => {
+    await Promise.all([
+      fetchStats(),
+      fetchProgressHistory()
+    ])
+  }, 30000)
+})
+
+onBeforeUnmount(() => {
+  if (refreshTimer.value) {
+    clearInterval(refreshTimer.value)
+    refreshTimer.value = null
+  }
 })
 </script>
 

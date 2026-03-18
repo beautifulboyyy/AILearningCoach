@@ -332,13 +332,19 @@ class ProgressSyncService:
                 progress.started_at = datetime.utcnow()
 
         # 记录历史
+        # 兼容数据库中使用小写枚举值（manual/time/task...）的场景
+        trigger_type_value = (
+            trigger_type.value
+            if hasattr(trigger_type, "value")
+            else str(trigger_type).lower()
+        )
         history = ProgressHistory(
             progress_id=progress.id,
             old_percentage=old_percentage,
             new_percentage=new_percentage,
             old_status=old_status,
             new_status=progress.status,
-            trigger_type=trigger_type,
+            trigger_type=trigger_type_value,
             trigger_source=trigger_source,
             trigger_detail=trigger_detail
         )

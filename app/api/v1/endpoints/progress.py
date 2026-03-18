@@ -12,6 +12,7 @@ from app.schemas.progress import (
     ProgressUpdate,
     ProgressStatsResponse,
     WeeklyReportResponse,
+    ModuleProgressUpdateRequest,
     RecordActivityRequest,
     RecordActivityResponse
 )
@@ -73,6 +74,90 @@ async def update_progress(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="更新进度失败"
+        )
+
+
+@router.put("/module/{module_key}")
+async def update_module_progress_by_key(
+    module_key: str,
+    update_data: ModuleProgressUpdateRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    按模块key更新进度（学习路径模块专用）
+    """
+    try:
+        # 先拿当前路径进度（用于计算delta）
+        path = await learning_path_service.get_active_learning_path(
+            user_id=current_user.id,
+            db=db
+        )
+        if not path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="暂无活跃学习路径"
+            )
+
+        current_progress_data = await progress_sync_service.get_path_progress(
+            path_id=path.id,
+            user_id=current_user.id,
+            db=db
+        )
+
+        current_percentage = 0.0
+        if current_progress_data:
+            for phase in current_progress_data.get("phases", []):
+                for module in phase.get("modules", []):
+                    if module.get("module_key") == module_key:
+                        current_percentage = float(module.get("completion_percentage", 0.0))
+                        break
+
+        target_percentage = update_data.completion_percentage
+        target_status = update_data.status
+        delta = 0.0
+
+        if target_percentage is not None:
+            delta = float(target_percentage) - current_percentage
+        elif target_status == ProgressStatus.COMPLETED:
+            delta = 100.0 - current_percentage
+        elif target_status == ProgressStatus.IN_PROGRESS:
+            # 至少推进到1%，避免状态为in_progress但进度仍为0
+            delta = max(1.0 - current_percentage, 0.0)
+        elif target_status == ProgressStatus.NOT_STARTED:
+            delta = -current_percentage
+
+        progress = await progress_sync_service.update_module_progress(
+            user_id=current_user.id,
+            module_key=module_key,
+            completion_delta=delta,
+            trigger_type=ProgressTriggerType.MANUAL,
+            trigger_source=f"api:module_update:{module_key}",
+            trigger_detail=update_data.notes or "manual update",
+            db=db
+        )
+
+        if not progress:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="未找到该模块，请确认模块标识正确"
+            )
+
+        return {
+            "module_key": module_key,
+            "old_progress": round(current_percentage, 2),
+            "new_progress": round(progress.completion_percentage, 2),
+            "progress_change": round(delta, 2),
+            "message": "模块进度更新成功"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"按模块key更新进度失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="更新模块进度失败"
         )
 
 

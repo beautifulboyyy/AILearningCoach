@@ -19,7 +19,7 @@ export const progressApi = {
 
   // 更新模块进度
   updateModuleProgress(module: string, data: UpdateProgressRequest): Promise<any> {
-    return request.put(`/api/v1/progress/${module}`, data)
+    return request.put(`/api/v1/progress/module/${module}`, data)
   },
 
   // 获取周报

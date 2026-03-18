@@ -47,6 +47,7 @@ async def create_task(
 @router.get("/", response_model=TaskListResponse)
 async def get_tasks(
     status_filter: Optional[TaskStatus] = None,
+    status: Optional[TaskStatus] = None,
     limit: int = 50,
     offset: int = 0,
     current_user: User = Depends(get_current_active_user),
@@ -55,10 +56,12 @@ async def get_tasks(
     """
     获取任务列表
     """
+    effective_status = status_filter or status
+
     tasks, total = await task_service.get_tasks(
         user_id=current_user.id,
         db=db,
-        status=status_filter,
+        status=effective_status,
         limit=limit,
         offset=offset
     )
