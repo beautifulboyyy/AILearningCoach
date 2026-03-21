@@ -114,7 +114,6 @@ class PersistenceService:
                         "chunk_id": chunk.chunk_id,
                         "document_id": knowledge_document.id,
                         "preview_text": self._truncate_utf8(chunk.content, 500),
-                        "content": self._truncate_utf8(chunk.content, 8000),
                         "file_type": chunk.file_type,
                         "page_idx": chunk.page_start,
                         "embedding": embeddings[chunk.chunk_id],

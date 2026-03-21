@@ -70,7 +70,6 @@ class MilvusClient:
             FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, max_length=100),
             FieldSchema(name="document_id", dtype=DataType.VARCHAR, max_length=100),
             FieldSchema(name="preview_text", dtype=DataType.VARCHAR, max_length=500),
-            FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=8000),
             FieldSchema(name="file_type", dtype=DataType.VARCHAR, max_length=50),
             FieldSchema(name="page_idx", dtype=DataType.INT64),
             FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=settings.EMBEDDING_DIMENSION),
@@ -117,7 +116,7 @@ class MilvusClient:
         插入数据
         
         Args:
-            data: 数据列表，每个元素包含 vector_id, chunk_id, document_id, preview_text, content, file_type, page_idx, embedding, metadata
+            data: 数据列表，每个元素包含 vector_id, chunk_id, document_id, preview_text, file_type, page_idx, embedding, metadata
         """
         collection = self.get_collection()
         
@@ -126,14 +125,13 @@ class MilvusClient:
         chunk_ids = [item["chunk_id"] for item in data]
         document_ids = [item["document_id"] for item in data]
         preview_texts = [item.get("preview_text", "") for item in data]
-        contents = [item["content"] for item in data]
         file_types = [item.get("file_type", "") for item in data]
         page_indexes = [item.get("page_idx") if item.get("page_idx") is not None else -1 for item in data]
         embeddings = [item["embedding"] for item in data]
         metadata_list = [item.get("metadata", {}) for item in data]
-        
+
         # 插入数据
-        collection.insert([vector_ids, chunk_ids, document_ids, preview_texts, contents, file_types, page_indexes, embeddings, metadata_list])
+        collection.insert([vector_ids, chunk_ids, document_ids, preview_texts, file_types, page_indexes, embeddings, metadata_list])
         collection.flush()
         
         app_logger.info(f"已插入 {len(data)} 条数据到集合: {self.collection_name}")
@@ -171,7 +169,7 @@ class MilvusClient:
             param=search_params,
             limit=top_k,
             expr=filter_expr,
-            output_fields=["vector_id", "chunk_id", "document_id", "preview_text", "content", "file_type", "page_idx", "metadata"]
+            output_fields=["vector_id", "chunk_id", "document_id", "preview_text", "file_type", "page_idx", "metadata"]
         )
         
         # 格式化结果
@@ -184,7 +182,6 @@ class MilvusClient:
                     "chunk_id": hit.entity.get("chunk_id"),
                     "document_id": hit.entity.get("document_id"),
                     "preview_text": hit.entity.get("preview_text"),
-                    "content": hit.entity.get("content"),
                     "file_type": hit.entity.get("file_type"),
                     "page_idx": hit.entity.get("page_idx"),
                     "metadata": hit.entity.get("metadata", {}),

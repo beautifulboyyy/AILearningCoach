@@ -68,7 +68,7 @@ class RAGRetriever:
             enriched_results.append(
                 {
                     **result,
-                    "content": detail.get("content", result.get("content") or result.get("preview_text", "")),
+                    "content": detail.get("content", result.get("preview_text", "")),
                     "source": source,
                 }
             )

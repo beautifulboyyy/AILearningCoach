@@ -157,7 +157,7 @@ def test_mineru_pdf_loader_invokes_default_cli_parser(monkeypatch, tmp_path):
 
     captured = {}
 
-    def fake_run(command, check, capture_output, text, encoding):
+    def fake_run(command, check):
         captured["command"] = command
         return None
 
@@ -186,7 +186,7 @@ def test_mineru_pdf_loader_finds_nested_content_list_json(monkeypatch, tmp_path)
     monkeypatch.setattr(
         mineru_pdf_loader.subprocess,
         "run",
-        lambda command, check, capture_output, text, encoding: None,
+        lambda command, check: None,
     )
     monkeypatch.setattr(MinerUPdfLoader, "_resolve_mineru_command", lambda self: ["mineru"])
 
@@ -194,6 +194,35 @@ def test_mineru_pdf_loader_finds_nested_content_list_json(monkeypatch, tmp_path)
     parsed = loader._run_mineru_cli(pdf_path, tmp_path / "mineru-output")
 
     assert parsed["job_id"] == "job-nested"
+
+
+def test_mineru_pdf_loader_adds_optional_source_flag(monkeypatch, tmp_path):
+    from app.ai.rag.ingest.loaders import mineru_pdf_loader
+    from app.ai.rag.ingest.loaders.mineru_pdf_loader import MinerUPdfLoader
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+
+    output_dir = tmp_path / "mineru-output"
+    output_dir.mkdir(parents=True)
+    content_list_path = output_dir / "sample_content_list.json"
+    content_list_path.write_text('{"content_list": [], "job_id": "job-cli"}', encoding="utf-8")
+
+    captured = {}
+
+    def fake_run(command, check):
+        captured["command"] = command
+        return None
+
+    monkeypatch.setattr(mineru_pdf_loader.subprocess, "run", fake_run)
+    monkeypatch.setattr(MinerUPdfLoader, "_resolve_mineru_command", lambda self: ["mineru"])
+    monkeypatch.setenv("MINERU_MODEL_SOURCE", "modelscope")
+
+    loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets")
+    loader._run_mineru_cli(pdf_path, output_dir)
+
+    assert "--source" in captured["command"]
+    assert "modelscope" in captured["command"]
 
 
 def test_persistence_service_marks_job_succeeded_and_inserts_milvus_payload():
@@ -264,6 +293,7 @@ def test_persistence_service_marks_job_succeeded_and_inserts_milvus_payload():
     assert milvus.inserted[0]["chunk_id"] == "chunk-1"
     assert milvus.inserted[0]["document_id"]
     assert milvus.inserted[0]["vector_id"] == "vec_chunk-1"
+    assert "content" not in milvus.inserted[0]
     assert job.started_at.tzinfo is None
     assert job.finished_at.tzinfo is None
     assert job.status == "succeeded"

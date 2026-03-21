@@ -2,6 +2,7 @@
 基于 MinerU 结构化结果的 PDF 加载器
 """
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import sys
 
 from app.ai.rag.ingest.base import BaseDocumentLoader
 from app.ai.rag.ingest.models import IngestedAsset, IngestedDocument
+from app.utils.logger import app_logger
 
 
 class MinerUPdfLoader(BaseDocumentLoader):
@@ -135,6 +137,7 @@ class MinerUPdfLoader(BaseDocumentLoader):
         return self._run_mineru_cli(path, output_dir)
 
     def _run_mineru_cli(self, path: Path, output_dir: Path) -> dict:
+        model_source = os.getenv("MINERU_MODEL_SOURCE", "").strip()
         command = self._resolve_mineru_command() + [
             "-p",
             str(path),
@@ -143,12 +146,17 @@ class MinerUPdfLoader(BaseDocumentLoader):
             "-b",
             "pipeline",
         ]
+        if model_source:
+            command.extend(["--source", model_source])
+
+        app_logger.info(f"开始使用 MinerU 解析 PDF: {path.name}")
+        app_logger.info("MinerU 本地 pipeline 模式不需要 API Key；首次运行可能下载或初始化模型，请耐心等待。")
+        if model_source:
+            app_logger.info(f"MinerU 模型源: {model_source}")
+
         subprocess.run(
             command,
             check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
         )
 
         candidates = sorted(output_dir.rglob("*content_list.json"))
