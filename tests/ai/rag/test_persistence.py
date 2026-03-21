@@ -141,3 +141,142 @@ def test_mineru_pdf_loader_falls_back_to_same_page_asset_linking(tmp_path):
 
     assert len(documents) == 1
     assert documents[0].metadata["related_asset_keys"] == ["image-0"]
+
+
+def test_persistence_service_marks_job_succeeded_and_inserts_milvus_payload():
+    from app.ai.rag.ingest.models import IngestedChunk, IngestedDocument
+    from app.ai.rag.ingest.persistence import PersistenceService
+
+    class FakeSession:
+        def __init__(self):
+            self.added = []
+            self.committed = 0
+            self.rolled_back = 0
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def commit(self):
+            self.committed += 1
+
+        async def rollback(self):
+            self.rolled_back += 1
+
+    class FakeMilvus:
+        def __init__(self):
+            self.inserted = None
+            self.collection_created = False
+
+        def create_collection(self, drop_if_exists=False):
+            self.collection_created = True
+
+        def insert(self, data):
+            self.inserted = data
+
+    session = FakeSession()
+    milvus = FakeMilvus()
+    service = PersistenceService(session=session, milvus=milvus)
+
+    document = IngestedDocument(
+        source_path="data/sample.md",
+        file_name="sample.md",
+        file_type="md",
+        content="正文内容",
+        loader_name="langchain",
+        metadata={},
+    )
+    chunk = IngestedChunk(
+        chunk_id="chunk-1",
+        source_path="data/sample.md",
+        file_type="md",
+        chunk_index=0,
+        content="正文内容",
+        metadata={},
+    )
+
+    __import__("asyncio").run(
+        service.persist(
+            source_path="data/sample.md",
+            file_hash="hash-1",
+            documents=[document],
+            chunks=[chunk],
+            embeddings={"chunk-1": [0.1, 0.2, 0.3]},
+        )
+    )
+
+    job = next(obj for obj in session.added if isinstance(obj, IngestJob))
+
+    assert session.committed == 1
+    assert milvus.collection_created is True
+    assert milvus.inserted[0]["chunk_id"] == "chunk-1"
+    assert milvus.inserted[0]["document_id"]
+    assert milvus.inserted[0]["vector_id"] == "vec_chunk-1"
+    assert job.status == "succeeded"
+
+
+def test_persistence_service_marks_job_failed_when_milvus_insert_raises():
+    from app.ai.rag.ingest.models import IngestedChunk, IngestedDocument
+    from app.ai.rag.ingest.persistence import PersistenceService
+
+    class FakeSession:
+        def __init__(self):
+            self.added = []
+            self.committed = 0
+            self.rolled_back = 0
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def commit(self):
+            self.committed += 1
+
+        async def rollback(self):
+            self.rolled_back += 1
+
+    class BrokenMilvus:
+        def create_collection(self, drop_if_exists=False):
+            return None
+
+        def insert(self, data):
+            raise RuntimeError("milvus unavailable")
+
+    session = FakeSession()
+    service = PersistenceService(session=session, milvus=BrokenMilvus())
+
+    document = IngestedDocument(
+        source_path="data/sample.md",
+        file_name="sample.md",
+        file_type="md",
+        content="正文内容",
+        loader_name="langchain",
+        metadata={},
+    )
+    chunk = IngestedChunk(
+        chunk_id="chunk-1",
+        source_path="data/sample.md",
+        file_type="md",
+        chunk_index=0,
+        content="正文内容",
+        metadata={},
+    )
+
+    try:
+        __import__("asyncio").run(
+            service.persist(
+                source_path="data/sample.md",
+                file_hash="hash-1",
+                documents=[document],
+                chunks=[chunk],
+                embeddings={"chunk-1": [0.1, 0.2, 0.3]},
+            )
+        )
+    except RuntimeError as exc:
+        assert "milvus unavailable" in str(exc)
+    else:
+        raise AssertionError("Expected persist to propagate Milvus failure")
+
+    job = next(obj for obj in session.added if isinstance(obj, IngestJob))
+
+    assert session.rolled_back == 1
+    assert job.status == "failed"
+    assert "milvus unavailable" in job.error_message
