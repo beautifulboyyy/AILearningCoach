@@ -9,7 +9,13 @@ from app.models.memory import Memory, MemoryType
 from app.models.learning_path import LearningPath, PathStatus, PathModule
 from app.models.task import Task, TaskPriority, TaskStatus
 from app.models.progress import LearningProgress, ProgressStatus, ProgressHistory, ProgressTriggerType
-from app.models.knowledge import KnowledgeChunk, DifficultyLevel
+from app.models.knowledge import (
+    IngestJob,
+    KnowledgeAsset,
+    KnowledgeChunk,
+    KnowledgeChunkAsset,
+    KnowledgeDocument,
+)
 
 __all__ = [
     "Base",
@@ -30,6 +36,9 @@ __all__ = [
     "ProgressStatus",
     "ProgressHistory",
     "ProgressTriggerType",
+    "KnowledgeDocument",
     "KnowledgeChunk",
-    "DifficultyLevel",
+    "KnowledgeAsset",
+    "KnowledgeChunkAsset",
+    "IngestJob",
 ]

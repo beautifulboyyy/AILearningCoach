@@ -1,19 +1,33 @@
 """
-RAG检索器模块
+RAG 检索器模块
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable, Awaitable
+
+from sqlalchemy import select
+
 from app.ai.rag.milvus_client import milvus_client
 from app.ai.rag.embeddings import embedding_model
+from app.db.session import async_session_maker
+from app.models.knowledge import (
+    KnowledgeAsset,
+    KnowledgeChunk,
+    KnowledgeChunkAsset,
+    KnowledgeDocument,
+)
 from app.utils.logger import app_logger
 
 
+CitationFetcher = Callable[[list[str]], Awaitable[dict[str, dict[str, Any]]]]
+
+
 class RAGRetriever:
-    """RAG检索器"""
-    
-    def __init__(self):
-        self.milvus = milvus_client
-        self.embedding = embedding_model
-    
+    """RAG 检索器"""
+
+    def __init__(self, milvus=None, embedding=None, citation_fetcher: CitationFetcher | None = None):
+        self.milvus = milvus or milvus_client
+        self.embedding = embedding or embedding_model
+        self.citation_fetcher = citation_fetcher or self._fetch_chunk_details
+
     async def retrieve(
         self,
         query: str,
@@ -21,84 +35,64 @@ class RAGRetriever:
         similarity_threshold: float = 0.7,
         filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
-        """
-        检索相关知识
-        
-        Args:
-            query: 查询问题
-            top_k: 返回前K个结果
-            similarity_threshold: 相似度阈值
-            filters: 过滤条件（如难度等级、讲义编号）
-        
-        Returns:
-            检索结果列表
-        """
-        # 1. 向量化查询
         query_embedding = await self.embedding.embed_query(query)
-        
-        # 2. 构建过滤表达式
-        filter_expr = None
-        if filters:
-            conditions = []
-            if "lecture_number" in filters:
-                conditions.append(f"metadata['lecture_number'] == {filters['lecture_number']}")
-            if "difficulty_level" in filters:
-                conditions.append(f"metadata['difficulty_level'] == '{filters['difficulty_level']}'")
-            
-            if conditions:
-                filter_expr = " and ".join(conditions)
-        
-        # 3. 向量搜索
+
+        filter_expr = self._build_filter_expr(filters)
         search_results = self.milvus.search(
             query_embedding=query_embedding,
-            top_k=top_k * 2,  # 多检索一些，后续过滤
-            filter_expr=filter_expr
+            top_k=top_k * 2,
+            filter_expr=filter_expr,
         )
-        
-        # 4. 过滤低相似度结果
+
         filtered_results = [
-            result for result in search_results
-            if result["distance"] >= similarity_threshold
+            result for result in search_results if result["distance"] >= similarity_threshold
         ][:top_k]
-        
-        app_logger.info(f"检索到 {len(filtered_results)} 个相关结果")
-        
-        return filtered_results
-    
+
+        if not filtered_results:
+            return []
+
+        chunk_ids = [result["chunk_id"] for result in filtered_results if result.get("chunk_id")]
+        hydrated = await self.citation_fetcher(chunk_ids)
+
+        enriched_results = []
+        for result in filtered_results:
+            chunk_id = result.get("chunk_id")
+            detail = hydrated.get(chunk_id, {})
+            source = {
+                "document_name": detail.get("document_name", "未知文档"),
+                "file_type": detail.get("file_type", result.get("file_type", "unknown")),
+                "page": detail.get("page"),
+                "source_path": detail.get("source_path", ""),
+                "assets": detail.get("assets", []),
+            }
+            enriched_results.append(
+                {
+                    **result,
+                    "content": detail.get("content", result.get("preview_text", "")),
+                    "source": source,
+                }
+            )
+
+        app_logger.info(f"检索到 {len(enriched_results)} 个相关结果")
+        return enriched_results
+
     def format_context(self, results: List[Dict[str, Any]]) -> str:
-        """
-        格式化检索结果为上下文
-        
-        Args:
-            results: 检索结果
-        
-        Returns:
-            格式化的上下文文本
-        """
         if not results:
             return "未找到相关知识内容。"
-        
+
         context_parts = []
-        for i, result in enumerate(results, 1):
-            metadata = result.get("metadata", {})
-            lecture = metadata.get("lecture_number", "未知")
-            section = metadata.get("section", "")
-            title = metadata.get("title", "")
-            
-            # 构建来源信息
-            source = f"讲{lecture}"
-            if section:
-                source += f"-第{section}节"
-            if title:
-                source += f": {title}"
-            
-            # 构建上下文片段
+        for index, result in enumerate(results, 1):
+            source = result.get("source", {})
+            document_name = source.get("document_name", "未知文档")
+            page = source.get("page")
+            page_suffix = f", 第 {page} 页" if page is not None else ""
+
             context_parts.append(
-                f"### 知识片段 {i} (来源: {source})\n{result['content']}\n"
+                f"### 知识片段 {index} (来源: {document_name}{page_suffix})\n{result['content']}\n"
             )
-        
+
         return "\n".join(context_parts)
-    
+
     async def hybrid_retrieve(
         self,
         query: str,
@@ -107,81 +101,112 @@ class RAGRetriever:
         keyword_weight: float = 0.3,
         use_rerank: bool = True
     ) -> List[Dict[str, Any]]:
-        """
-        混合检索（向量检索 + 关键词检索 + Reranking）
-        
-        Args:
-            query: 查询问题
-            top_k: 返回前K个结果
-            vector_weight: 向量检索权重
-            keyword_weight: 关键词检索权重
-            use_rerank: 是否使用Reranking
-        
-        Returns:
-            混合检索结果
-        """
         try:
-            # 1. 向量检索（获取更多候选，用于混合）
             vector_results = await self.retrieve(query, top_k=top_k * 3)
-            
             if not vector_results:
                 return []
-            
-            # 2. BM25关键词检索（基于向量检索结果）
+
             from app.ai.rag.bm25 import BM25
-            
-            # 准备文档
-            documents = [r["content"] for r in vector_results]
-            
-            # 构建BM25索引
+
+            documents = [result["content"] for result in vector_results]
             bm25 = BM25()
             bm25.build_index(documents)
-            
-            # BM25检索
             bm25_scores = bm25.get_scores(query)
-            
-            # 3. 混合分数计算
-            # 归一化向量分数（距离）
-            vector_distances = [r["distance"] for r in vector_results]
+
+            vector_distances = [result["distance"] for result in vector_results]
             max_distance = max(vector_distances) if vector_distances else 1.0
-            norm_vector_scores = [d / max_distance for d in vector_distances]
-            
-            # 归一化BM25分数
+            norm_vector_scores = [distance / max_distance for distance in vector_distances]
+
             max_bm25 = max(bm25_scores) if bm25_scores else 1.0
-            norm_bm25_scores = [s / max_bm25 if max_bm25 > 0 else 0 for s in bm25_scores]
-            
-            # 计算混合分数
-            for i, result in enumerate(vector_results):
-                hybrid_score = (
-                    vector_weight * norm_vector_scores[i] +
-                    keyword_weight * norm_bm25_scores[i]
+            norm_bm25_scores = [score / max_bm25 if max_bm25 > 0 else 0 for score in bm25_scores]
+
+            for index, result in enumerate(vector_results):
+                result["hybrid_score"] = (
+                    vector_weight * norm_vector_scores[index] +
+                    keyword_weight * norm_bm25_scores[index]
                 )
-                result["hybrid_score"] = hybrid_score
-                result["bm25_score"] = bm25_scores[i]
-            
-            # 按混合分数排序
-            vector_results.sort(key=lambda x: x["hybrid_score"], reverse=True)
-            
-            # 4. Reranking（可选）
+                result["bm25_score"] = bm25_scores[index]
+
+            vector_results.sort(key=lambda item: item["hybrid_score"], reverse=True)
+
             if use_rerank:
                 from app.ai.rag.reranker import reranker
-                final_results = reranker.rerank(query, vector_results[:top_k * 2], top_k)
-            else:
-                final_results = vector_results[:top_k]
-            
-            app_logger.info(
-                f"混合检索完成: 向量权重={vector_weight}, "
-                f"关键词权重={keyword_weight}, "
-                f"Rerank={'启用' if use_rerank else '禁用'}"
-            )
-            
-            return final_results
-            
-        except Exception as e:
-            app_logger.warning(f"混合检索失败，降级为纯向量检索: {e}")
-            # 降级为纯向量检索
+
+                return reranker.rerank(query, vector_results[:top_k * 2], top_k)
+            return vector_results[:top_k]
+        except Exception as exc:
+            app_logger.warning(f"混合检索失败，降级为纯向量检索: {exc}")
             return await self.retrieve(query, top_k=top_k)
 
+    async def _fetch_chunk_details(self, chunk_ids: list[str]) -> dict[str, dict[str, Any]]:
+        if not chunk_ids:
+            return {}
 
-# 全局检索器实例
+        async with async_session_maker() as session:
+            chunk_result = await session.execute(
+                select(KnowledgeChunk).where(KnowledgeChunk.id.in_(chunk_ids))
+            )
+            chunks = chunk_result.scalars().all()
+            if not chunks:
+                return {}
+
+            document_ids = {chunk.document_id for chunk in chunks}
+            documents_result = await session.execute(
+                select(KnowledgeDocument).where(KnowledgeDocument.id.in_(document_ids))
+            )
+            documents = {document.id: document for document in documents_result.scalars().all()}
+
+            links_result = await session.execute(
+                select(KnowledgeChunkAsset).where(KnowledgeChunkAsset.chunk_id.in_(chunk_ids))
+            )
+            links = links_result.scalars().all()
+            asset_ids = {link.asset_id for link in links}
+
+            assets = {}
+            if asset_ids:
+                assets_result = await session.execute(
+                    select(KnowledgeAsset).where(KnowledgeAsset.id.in_(asset_ids))
+                )
+                assets = {asset.id: asset for asset in assets_result.scalars().all()}
+
+        links_by_chunk: dict[str, list[KnowledgeChunkAsset]] = {}
+        for link in links:
+            links_by_chunk.setdefault(link.chunk_id, []).append(link)
+
+        hydrated: dict[str, dict[str, Any]] = {}
+        for chunk in chunks:
+            document = documents.get(chunk.document_id)
+            chunk_assets = [
+                {
+                    "asset_type": assets[link.asset_id].asset_type,
+                    "asset_path": assets[link.asset_id].asset_path,
+                    "caption": assets[link.asset_id].caption,
+                }
+                for link in sorted(links_by_chunk.get(chunk.id, []), key=lambda item: item.sort_order)
+                if link.asset_id in assets
+            ]
+            hydrated[chunk.id] = {
+                "content": chunk.content,
+                "document_name": document.file_name if document else "未知文档",
+                "file_type": document.file_type if document else "unknown",
+                "page": chunk.page_start,
+                "source_path": document.source_path if document else "",
+                "assets": chunk_assets,
+            }
+
+        return hydrated
+
+    @staticmethod
+    def _build_filter_expr(filters: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not filters:
+            return None
+
+        conditions = []
+        if "file_type" in filters:
+            conditions.append(f"file_type == '{filters['file_type']}'")
+        if "document_id" in filters:
+            conditions.append(f"document_id == '{filters['document_id']}'")
+        return " and ".join(conditions) if conditions else None
+
+
 rag_retriever = RAGRetriever()
