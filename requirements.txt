@@ -27,6 +27,7 @@ langchain-community>=0.0.20
 langgraph>=0.0.20
 httpx>=0.26.0
 docx2txt>=0.8
+mineru[core]>=2.1.10
 
 # Vector Database
 pymilvus>=2.3.5

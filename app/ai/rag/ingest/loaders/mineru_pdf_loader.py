@@ -1,8 +1,11 @@
 """
 基于 MinerU 结构化结果的 PDF 加载器
 """
+import json
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 
 from app.ai.rag.ingest.base import BaseDocumentLoader
 from app.ai.rag.ingest.models import IngestedAsset, IngestedDocument
@@ -15,7 +18,7 @@ class MinerUPdfLoader(BaseDocumentLoader):
 
     def __init__(self, asset_root: Path | None = None, parser=None):
         self.asset_root = Path(asset_root) if asset_root is not None else Path("data/knowledge_assets")
-        self.parser = parser or self._missing_parser
+        self.parser = parser or self._default_parser
 
     async def load(self, path: Path) -> list[IngestedDocument]:
         parsed = self.parser(path)
@@ -126,6 +129,44 @@ class MinerUPdfLoader(BaseDocumentLoader):
             return item["html"].strip()
         return ""
 
+    def _default_parser(self, path: Path) -> dict:
+        output_dir = Path("data/mineru_output") / path.stem
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return self._run_mineru_cli(path, output_dir)
+
+    def _run_mineru_cli(self, path: Path, output_dir: Path) -> dict:
+        command = self._resolve_mineru_command() + [
+            "-p",
+            str(path),
+            "-o",
+            str(output_dir),
+            "-b",
+            "pipeline",
+        ]
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        candidates = sorted(output_dir.rglob("*content_list.json"))
+        if not candidates:
+            raise RuntimeError(f"MinerU output content_list.json not found under: {output_dir}")
+
+        with candidates[0].open("r", encoding="utf-8") as file:
+            parsed = json.load(file)
+
+        parsed.setdefault("job_id", output_dir.name)
+        return parsed
+
     @staticmethod
-    def _missing_parser(path: Path):
-        raise RuntimeError(f"MinerU parser is not configured for: {path}")
+    def _resolve_mineru_command() -> list[str]:
+        executable = Path(sys.executable).resolve()
+        scripts_dir = executable.parent
+        for name in ("mineru.exe", "mineru"):
+            candidate = scripts_dir / name
+            if candidate.exists():
+                return [str(candidate)]
+        return ["mineru"]

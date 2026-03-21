@@ -32,12 +32,13 @@ class PersistenceService:
         chunks: list[IngestedChunk],
         embeddings: dict[str, list[float]],
     ) -> IngestJob:
+        inserted_vector_ids: list[str] = []
         job = IngestJob(
             id=str(uuid4()),
             source_path=source_path,
             file_hash=file_hash,
             status="running",
-            started_at=datetime.now(timezone.utc),
+            started_at=self._utcnow_naive(),
         )
         self.session.add(job)
 
@@ -112,8 +113,8 @@ class PersistenceService:
                         "vector_id": vector_id,
                         "chunk_id": chunk.chunk_id,
                         "document_id": knowledge_document.id,
-                        "preview_text": chunk.content[:500],
-                        "content": chunk.content[:8000],
+                        "preview_text": self._truncate_utf8(chunk.content, 500),
+                        "content": self._truncate_utf8(chunk.content, 8000),
                         "file_type": chunk.file_type,
                         "page_idx": chunk.page_start,
                         "embedding": embeddings[chunk.chunk_id],
@@ -123,15 +124,18 @@ class PersistenceService:
 
             self.milvus.create_collection(drop_if_exists=False)
             self.milvus.insert(milvus_payload)
+            inserted_vector_ids = [item["vector_id"] for item in milvus_payload]
 
             job.status = "succeeded"
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = self._utcnow_naive()
             await self.session.commit()
             return job
         except Exception as exc:
             job.status = "failed"
             job.error_message = str(exc)
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = self._utcnow_naive()
+            if inserted_vector_ids:
+                self._delete_vectors(inserted_vector_ids)
             await self.session.rollback()
             raise
 
@@ -151,8 +155,7 @@ class PersistenceService:
         )
         vector_ids = [vector_id for vector_id in vector_result.scalars().all() if vector_id]
         if vector_ids:
-            quoted_ids = ", ".join(f'"{vector_id}"' for vector_id in vector_ids)
-            self.milvus.delete(f"vector_id in [{quoted_ids}]")
+            self._delete_vectors(vector_ids)
 
         await self.session.execute(
             delete(KnowledgeChunkAsset).where(
@@ -194,3 +197,25 @@ class PersistenceService:
             import shutil
 
             shutil.rmtree(candidate, ignore_errors=True)
+
+    @staticmethod
+    def _truncate_utf8(text: str, max_bytes: int) -> str:
+        encoded = text.encode("utf-8")
+        if len(encoded) <= max_bytes:
+            return text
+
+        truncated = encoded[:max_bytes]
+        while truncated:
+            try:
+                return truncated.decode("utf-8")
+            except UnicodeDecodeError:
+                truncated = truncated[:-1]
+        return ""
+
+    @staticmethod
+    def _utcnow_naive() -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def _delete_vectors(self, vector_ids: list[str]) -> None:
+        quoted_ids = ", ".join(f'"{vector_id}"' for vector_id in vector_ids)
+        self.milvus.delete(f"vector_id in [{quoted_ids}]")

@@ -143,6 +143,59 @@ def test_mineru_pdf_loader_falls_back_to_same_page_asset_linking(tmp_path):
     assert documents[0].metadata["related_asset_keys"] == ["image-0"]
 
 
+def test_mineru_pdf_loader_invokes_default_cli_parser(monkeypatch, tmp_path):
+    from app.ai.rag.ingest.loaders import mineru_pdf_loader
+    from app.ai.rag.ingest.loaders.mineru_pdf_loader import MinerUPdfLoader
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+
+    output_dir = tmp_path / "mineru-output"
+    output_dir.mkdir(parents=True)
+    content_list_path = output_dir / "sample_content_list.json"
+    content_list_path.write_text('{"content_list": [], "job_id": "job-cli"}', encoding="utf-8")
+
+    captured = {}
+
+    def fake_run(command, check, capture_output, text, encoding):
+        captured["command"] = command
+        return None
+
+    monkeypatch.setattr(mineru_pdf_loader.subprocess, "run", fake_run)
+    monkeypatch.setattr(MinerUPdfLoader, "_resolve_mineru_command", lambda self: ["mineru"])
+
+    loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets")
+    parsed = loader._run_mineru_cli(pdf_path, output_dir)
+
+    assert captured["command"][:2] == ["mineru", "-p"]
+    assert parsed["job_id"] == "job-cli"
+
+
+def test_mineru_pdf_loader_finds_nested_content_list_json(monkeypatch, tmp_path):
+    from app.ai.rag.ingest.loaders import mineru_pdf_loader
+    from app.ai.rag.ingest.loaders.mineru_pdf_loader import MinerUPdfLoader
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+
+    nested_dir = tmp_path / "mineru-output" / "job-1"
+    nested_dir.mkdir(parents=True)
+    content_list_path = nested_dir / "sample_content_list.json"
+    content_list_path.write_text('{"content_list": [], "job_id": "job-nested"}', encoding="utf-8")
+
+    monkeypatch.setattr(
+        mineru_pdf_loader.subprocess,
+        "run",
+        lambda command, check, capture_output, text, encoding: None,
+    )
+    monkeypatch.setattr(MinerUPdfLoader, "_resolve_mineru_command", lambda self: ["mineru"])
+
+    loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets")
+    parsed = loader._run_mineru_cli(pdf_path, tmp_path / "mineru-output")
+
+    assert parsed["job_id"] == "job-nested"
+
+
 def test_persistence_service_marks_job_succeeded_and_inserts_milvus_payload():
     from app.ai.rag.ingest.models import IngestedChunk, IngestedDocument
     from app.ai.rag.ingest.persistence import PersistenceService
@@ -211,6 +264,8 @@ def test_persistence_service_marks_job_succeeded_and_inserts_milvus_payload():
     assert milvus.inserted[0]["chunk_id"] == "chunk-1"
     assert milvus.inserted[0]["document_id"]
     assert milvus.inserted[0]["vector_id"] == "vec_chunk-1"
+    assert job.started_at.tzinfo is None
+    assert job.finished_at.tzinfo is None
     assert job.status == "succeeded"
 
 
@@ -280,3 +335,84 @@ def test_persistence_service_marks_job_failed_when_milvus_insert_raises():
     assert session.rolled_back == 1
     assert job.status == "failed"
     assert "milvus unavailable" in job.error_message
+
+
+def test_persistence_service_compensates_milvus_when_commit_fails():
+    from app.ai.rag.ingest.models import IngestedChunk, IngestedDocument
+    from app.ai.rag.ingest.persistence import PersistenceService
+
+    class FakeSession:
+        def __init__(self):
+            self.added = []
+            self.rolled_back = 0
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def commit(self):
+            raise RuntimeError("commit failed")
+
+        async def rollback(self):
+            self.rolled_back += 1
+
+    class FakeMilvus:
+        def __init__(self):
+            self.deleted_expr = None
+
+        def create_collection(self, drop_if_exists=False):
+            return None
+
+        def insert(self, data):
+            return None
+
+        def delete(self, expr):
+            self.deleted_expr = expr
+
+    session = FakeSession()
+    milvus = FakeMilvus()
+    service = PersistenceService(session=session, milvus=milvus)
+
+    document = IngestedDocument(
+        source_path="data/sample.md",
+        file_name="sample.md",
+        file_type="md",
+        content="正文内容",
+        loader_name="langchain",
+        metadata={},
+    )
+    chunk = IngestedChunk(
+        chunk_id="chunk-1",
+        source_path="data/sample.md",
+        file_type="md",
+        chunk_index=0,
+        content="正文内容",
+        metadata={},
+    )
+
+    try:
+        __import__("asyncio").run(
+            service.persist(
+                source_path="data/sample.md",
+                file_hash="hash-1",
+                documents=[document],
+                chunks=[chunk],
+                embeddings={"chunk-1": [0.1, 0.2, 0.3]},
+            )
+        )
+    except RuntimeError as exc:
+        assert "commit failed" in str(exc)
+    else:
+        raise AssertionError("Expected persist to propagate commit failure")
+
+    assert session.rolled_back == 1
+    assert milvus.deleted_expr == 'vector_id in ["vec_chunk-1"]'
+
+
+def test_persistence_service_truncates_preview_text_by_utf8_bytes():
+    from app.ai.rag.ingest.persistence import PersistenceService
+
+    text = "中" * 400
+    truncated = PersistenceService._truncate_utf8(text, 500)
+
+    assert len(truncated.encode("utf-8")) <= 500
+    assert truncated
