@@ -39,35 +39,7 @@ class MinerUPdfLoader(BaseDocumentLoader):
         )
 
         assets = self._extract_assets(path, job_id, content_list, images_by_path)
-        documents: list[IngestedDocument] = []
-
-        for index, item in enumerate(content_list):
-            if item.get("type") not in {"text", "table", "equation"}:
-                continue
-
-            content = self._extract_text_content(item)
-            if not content:
-                continue
-
-            related_assets = self._resolve_related_assets(index, item, content_list, assets)
-            documents.append(
-                IngestedDocument(
-                    source_path=str(path),
-                    file_name=path.name,
-                    file_type="pdf",
-                    content=content,
-                    loader_name="mineru",
-                    page_start=item.get("page_idx"),
-                    page_end=item.get("page_idx"),
-                    metadata={
-                        "page_idx": item.get("page_idx"),
-                        "related_asset_keys": [asset.asset_key for asset in related_assets],
-                    },
-                    assets=related_assets,
-                )
-            )
-
-        return documents
+        return self._build_documents(path, content_list, assets)
 
     def _extract_assets(self, path: Path, job_id: str, content_list: list[dict], images_by_path: dict[str, object]) -> list[IngestedAsset]:
         assets: list[IngestedAsset] = []
@@ -125,6 +97,71 @@ class MinerUPdfLoader(BaseDocumentLoader):
             return same_page_assets
 
         return [asset for asset in assets if asset.page_idx == page_idx]
+
+    def _build_documents(
+        self,
+        path: Path,
+        content_list: list[dict],
+        assets: list[IngestedAsset],
+    ) -> list[IngestedDocument]:
+        grouped: list[dict] = []
+        current_group: dict | None = None
+
+        for index, item in enumerate(content_list):
+            if item.get("type") not in {"text", "table", "equation"}:
+                continue
+
+            content = self._extract_text_content(item)
+            if not content:
+                continue
+
+            page_idx = item.get("page_idx")
+            related_assets = self._resolve_related_assets(index, item, content_list, assets)
+            related_asset_keys = [asset.asset_key for asset in related_assets]
+
+            if current_group is None or current_group["page_idx"] != page_idx:
+                if current_group is not None:
+                    grouped.append(current_group)
+                current_group = {
+                    "page_idx": page_idx,
+                    "parts": [content],
+                    "asset_keys": list(related_asset_keys),
+                }
+            else:
+                current_group["parts"].append(content)
+                for asset_key in related_asset_keys:
+                    if asset_key not in current_group["asset_keys"]:
+                        current_group["asset_keys"].append(asset_key)
+
+        if current_group is not None:
+            grouped.append(current_group)
+
+        documents: list[IngestedDocument] = []
+        assets_by_key = {asset.asset_key: asset for asset in assets}
+        for group in grouped:
+            related_assets = [
+                assets_by_key[asset_key]
+                for asset_key in group["asset_keys"]
+                if asset_key in assets_by_key
+            ]
+            documents.append(
+                IngestedDocument(
+                    source_path=str(path),
+                    file_name=path.name,
+                    file_type="pdf",
+                    content="\n\n".join(group["parts"]),
+                    loader_name="mineru",
+                    page_start=group["page_idx"],
+                    page_end=group["page_idx"],
+                    metadata={
+                        "page_idx": group["page_idx"],
+                        "related_asset_keys": list(group["asset_keys"]),
+                    },
+                    assets=related_assets,
+                )
+            )
+
+        return documents
 
     @staticmethod
     def _extract_caption(item: dict) -> str | None:

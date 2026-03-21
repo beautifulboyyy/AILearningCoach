@@ -52,6 +52,7 @@ class MilvusClient:
             drop_if_exists: 如果集合已存在是否删除
         """
         self.connect()
+        self.collection = None
         
         # 检查集合是否存在
         if utility.has_collection(self.collection_name):
@@ -100,6 +101,16 @@ class MilvusClient:
         )
         
         app_logger.info(f"已创建集合: {self.collection_name}")
+
+    def ensure_collection(self):
+        """确保集合存在，适合在离线导入前做幂等初始化。"""
+        self.connect()
+        if utility.has_collection(self.collection_name):
+            self.collection = Collection(self.collection_name)
+            return self.collection
+
+        self.create_collection(drop_if_exists=False)
+        return self.collection
     
     def get_collection(self) -> Collection:
         """获取集合"""
@@ -108,7 +119,10 @@ class MilvusClient:
             if utility.has_collection(self.collection_name):
                 self.collection = Collection(self.collection_name)
             else:
-                raise ValueError(f"集合不存在: {self.collection_name}")
+                self.create_collection(drop_if_exists=False)
+        elif not utility.has_collection(self.collection_name):
+            self.collection = None
+            self.create_collection(drop_if_exists=False)
         return self.collection
     
     def insert(self, data: List[Dict[str, Any]]):
@@ -118,7 +132,7 @@ class MilvusClient:
         Args:
             data: 数据列表，每个元素包含 vector_id, chunk_id, document_id, preview_text, file_type, page_idx, embedding, metadata
         """
-        collection = self.get_collection()
+        collection = self.ensure_collection()
         
         # 准备数据
         vector_ids = [item["vector_id"] for item in data]

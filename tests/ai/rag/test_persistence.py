@@ -148,6 +148,32 @@ def test_mineru_pdf_loader_falls_back_to_same_page_asset_linking(tmp_path):
     assert documents[0].metadata["related_asset_keys"] == ["image-0"]
 
 
+def test_mineru_pdf_loader_merges_same_page_text_blocks(tmp_path):
+    from app.ai.rag.ingest.loaders.mineru_pdf_loader import MinerUPdfLoader
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+
+    def fake_parser(path: Path):
+        return {
+            "job_id": "job-merge",
+            "images": [],
+            "content_list": [
+                {"type": "text", "page_idx": 1, "text": "Mengshu Sun"},
+                {"type": "text", "page_idx": 1, "text": "Ant Group"},
+                {"type": "text", "page_idx": 2, "text": "Abstract\nThis paper proposes..."},
+            ],
+        }
+
+    loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets", parser=fake_parser)
+    documents = __import__("asyncio").run(loader.load(pdf_path))
+
+    assert len(documents) == 2
+    assert documents[0].page_start == 1
+    assert documents[0].content == "Mengshu Sun\n\nAnt Group"
+    assert documents[1].page_start == 2
+
+
 def test_mineru_pdf_loader_uses_precision_mode_when_token_is_available(monkeypatch, tmp_path):
     from app.ai.rag.ingest.loaders import mineru_pdf_loader
     from app.ai.rag.ingest.loaders.mineru_pdf_loader import MinerUPdfLoader
