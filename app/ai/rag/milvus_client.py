@@ -212,6 +212,7 @@ class MilvusClient:
             expr: 删除表达式，如 'vector_id in ["id1", "id2"]'
         """
         collection = self.get_collection()
+        collection.load()
         collection.delete(expr)
         collection.flush()
         app_logger.info(f"已从集合 {self.collection_name} 删除数据: {expr}")

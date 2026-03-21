@@ -67,3 +67,31 @@ def test_milvus_client_insert_creates_collection_when_missing(monkeypatch):
 
     assert calls["created"] >= 1
     assert calls["inserted"] == 1
+
+
+def test_milvus_client_delete_loads_collection_before_delete(monkeypatch):
+    calls = {"loaded": 0, "deleted": 0}
+
+    class FakeCollection:
+        def __init__(self, name=None, schema=None):
+            self.name = name
+
+        def load(self):
+            calls["loaded"] += 1
+
+        def delete(self, expr):
+            calls["deleted"] += 1
+
+        def flush(self):
+            return None
+
+    client = MilvusClient()
+    client.collection = FakeCollection("learning_coach_knowledge")
+    monkeypatch.setattr(milvus_module.connections, "connect", lambda alias, host, port: None)
+    monkeypatch.setattr(milvus_module.utility, "has_collection", lambda name: True)
+    monkeypatch.setattr(milvus_module, "Collection", FakeCollection)
+
+    client.delete('vector_id in ["vec-1"]')
+
+    assert calls["loaded"] == 1
+    assert calls["deleted"] == 1
