@@ -72,9 +72,10 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-v3"
     EMBEDDING_DIMENSION: int = 1024
 
-    # MinerU 远端解析配置
-    MINERU_BACKEND: str = "vlm-http-client"
-    MINERU_SERVER_URL: Optional[str] = None
+    # MinerU Open API 配置
+    MINERU_API_MODE: str = "precision"
+    MINERU_TOKEN: Optional[str] = None
+    MINERU_TIMEOUT: int = 1200
     
     # JWT配置
     SECRET_KEY: str

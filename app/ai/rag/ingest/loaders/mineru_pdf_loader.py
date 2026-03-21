@@ -1,11 +1,9 @@
 """
 基于 MinerU 结构化结果的 PDF 加载器
 """
-import json
 from pathlib import Path
 import shutil
-import subprocess
-import sys
+from types import SimpleNamespace
 
 from app.ai.rag.ingest.base import BaseDocumentLoader
 from app.ai.rag.ingest.models import IngestedAsset, IngestedDocument
@@ -18,16 +16,29 @@ class MinerUPdfLoader(BaseDocumentLoader):
 
     supported_extensions = {".pdf"}
 
-    def __init__(self, asset_root: Path | None = None, parser=None):
+    def __init__(self, asset_root: Path | None = None, parser=None, client_factory=None):
         self.asset_root = Path(asset_root) if asset_root is not None else Path("data/knowledge_assets")
         self.parser = parser or self._default_parser
+        self.client_factory = client_factory or self._create_client
 
     async def load(self, path: Path) -> list[IngestedDocument]:
         parsed = self.parser(path)
         job_id = parsed.get("job_id", "job")
         content_list = parsed.get("content_list", [])
+        images = parsed.get("images", [])
+        images_by_path = {
+            str(Path(getattr(image, "path", "")).as_posix()): image
+            for image in images
+        }
+        images_by_path.update(
+            {
+                getattr(image, "name", ""): image
+                for image in images
+                if getattr(image, "name", "")
+            }
+        )
 
-        assets = self._extract_assets(path, job_id, content_list)
+        assets = self._extract_assets(path, job_id, content_list, images_by_path)
         documents: list[IngestedDocument] = []
 
         for index, item in enumerate(content_list):
@@ -58,7 +69,7 @@ class MinerUPdfLoader(BaseDocumentLoader):
 
         return documents
 
-    def _extract_assets(self, path: Path, job_id: str, content_list: list[dict]) -> list[IngestedAsset]:
+    def _extract_assets(self, path: Path, job_id: str, content_list: list[dict], images_by_path: dict[str, object]) -> list[IngestedAsset]:
         assets: list[IngestedAsset] = []
         relative_root = Path(path.stem) / job_id
         target_root = self.asset_root / relative_root
@@ -70,8 +81,13 @@ class MinerUPdfLoader(BaseDocumentLoader):
                 continue
 
             source_image_path = Path(item["img_path"])
+            image_key = str(Path(item["img_path"]).as_posix())
+            image = images_by_path.get(image_key) or images_by_path.get(source_image_path.name)
+            if image is None:
+                continue
+
             target_path = target_root / source_image_path.name
-            shutil.copy2(source_image_path, target_path)
+            target_path.write_bytes(image.data)
 
             caption = self._extract_caption(item)
             assets.append(
@@ -132,55 +148,74 @@ class MinerUPdfLoader(BaseDocumentLoader):
         return ""
 
     def _default_parser(self, path: Path) -> dict:
-        output_dir = Path("data/mineru_output") / path.stem
-        output_dir.mkdir(parents=True, exist_ok=True)
-        return self._run_mineru_cli(path, output_dir)
+        return self._extract_with_sdk(path)
 
-    def _run_mineru_cli(self, path: Path, output_dir: Path) -> dict:
-        backend = settings.MINERU_BACKEND.strip()
-        server_url = (settings.MINERU_SERVER_URL or "").strip()
+    def _extract_with_sdk(self, path: Path) -> dict:
+        mode = (settings.MINERU_API_MODE or "precision").strip().lower()
+        token = (settings.MINERU_TOKEN or "").strip() or None
+        client = self.client_factory(token)
 
-        if backend not in {"vlm-http-client", "hybrid-http-client"}:
-            raise RuntimeError(f"Unsupported MinerU backend for remote mode: {backend}")
-        if not server_url:
-            raise RuntimeError("MINERU_SERVER_URL is not configured for remote PDF parsing")
+        app_logger.info(f"开始使用 MinerU Open API 解析 PDF: {path.name}")
+        app_logger.info(f"MinerU API mode: {mode}")
 
-        command = self._resolve_mineru_command() + [
-            "-p",
-            str(path),
-            "-o",
-            str(output_dir),
-            "-b",
-            backend,
-            "-u",
-            server_url,
-        ]
+        if mode == "precision":
+            if not token:
+                app_logger.warning("未配置 MINERU_TOKEN，MinerU precision 模式不可用，已降级为 flash 模式。")
+                mode = "flash"
+            else:
+                result = client.extract(
+                    str(path),
+                    language="ch",
+                    timeout=settings.MINERU_TIMEOUT,
+                    ocr=False,
+                    formula=True,
+                    table=True,
+                )
+                return self._normalize_result(path, result, mode)
 
-        app_logger.info(f"开始使用 MinerU 远端解析 PDF: {path.name}")
-        app_logger.info(f"MinerU backend: {backend}")
-        app_logger.info(f"MinerU server: {server_url}")
+        if mode == "flash":
+            result = client.flash_extract(
+                str(path),
+                language="ch",
+                timeout=settings.MINERU_TIMEOUT,
+            )
+            return self._normalize_result(path, result, mode)
 
-        subprocess.run(
-            command,
-            check=True,
-        )
-
-        candidates = sorted(output_dir.rglob("*content_list.json"))
-        if not candidates:
-            raise RuntimeError(f"MinerU output content_list.json not found under: {output_dir}")
-
-        with candidates[0].open("r", encoding="utf-8") as file:
-            parsed = json.load(file)
-
-        parsed.setdefault("job_id", output_dir.name)
-        return parsed
+        raise RuntimeError(f"Unsupported MinerU API mode: {mode}")
 
     @staticmethod
-    def _resolve_mineru_command() -> list[str]:
-        executable = Path(sys.executable).resolve()
-        scripts_dir = executable.parent
-        for name in ("mineru.exe", "mineru"):
-            candidate = scripts_dir / name
-            if candidate.exists():
-                return [str(candidate)]
-        return ["mineru"]
+    def _create_client(token: str | None):
+        try:
+            from mineru import MinerU
+        except ImportError as exc:
+            raise ImportError(
+                "mineru-open-sdk is required for PDF parsing. Install with: pip install mineru-open-sdk"
+            ) from exc
+        return MinerU(token=token)
+
+    @staticmethod
+    def _normalize_result(path: Path, result: object, mode: str) -> dict:
+        state = getattr(result, "state", None)
+        if state != "done":
+            error = getattr(result, "error", None)
+            raise RuntimeError(f"MinerU extraction failed for {path.name}: state={state}, error={error}")
+
+        content_list = getattr(result, "content_list", None) or []
+        images = getattr(result, "images", None) or []
+        markdown = getattr(result, "markdown", None) or ""
+
+        if not content_list and markdown:
+            content_list = [
+                {
+                    "type": "text",
+                    "page_idx": 1,
+                    "text": markdown,
+                }
+            ]
+
+        return {
+            "job_id": getattr(result, "task_id", None) or path.stem,
+            "content_list": content_list,
+            "images": images,
+            "mode": mode,
+        }

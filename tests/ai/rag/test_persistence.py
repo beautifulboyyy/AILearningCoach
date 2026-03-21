@@ -11,6 +11,7 @@ os.environ.setdefault("DASHSCOPE_API_KEY", "test-key")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.models.knowledge import (
     IngestJob,
@@ -69,19 +70,21 @@ def test_mineru_pdf_loader_extracts_assets_with_relative_paths(tmp_path):
 
     pdf_path = tmp_path / "sample.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")
-
-    images_dir = tmp_path / "mineru-output" / "images"
-    images_dir.mkdir(parents=True)
-    (images_dir / "figure-1.png").write_bytes(b"image")
+    image = SimpleNamespace(
+        path="images/figure-1.png",
+        name="figure-1.png",
+        data=b"image",
+    )
 
     def fake_parser(path: Path):
         return {
             "job_id": "job-1",
+            "images": [image],
             "content_list": [
                 {
                     "type": "image",
                     "page_idx": 2,
-                    "img_path": str(images_dir / "figure-1.png"),
+                    "img_path": "images/figure-1.png",
                     "image_caption": [{"text": "系统架构图"}],
                     "bbox": [0, 0, 10, 10],
                 },
@@ -111,19 +114,21 @@ def test_mineru_pdf_loader_falls_back_to_same_page_asset_linking(tmp_path):
 
     pdf_path = tmp_path / "sample.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")
-
-    images_dir = tmp_path / "mineru-output" / "images"
-    images_dir.mkdir(parents=True)
-    (images_dir / "figure-2.png").write_bytes(b"image")
+    image = SimpleNamespace(
+        path="images/figure-2.png",
+        name="figure-2.png",
+        data=b"image",
+    )
 
     def fake_parser(path: Path):
         return {
             "job_id": "job-2",
+            "images": [image],
             "content_list": [
                 {
                     "type": "image",
                     "page_idx": 4,
-                    "img_path": str(images_dir / "figure-2.png"),
+                    "img_path": "images/figure-2.png",
                     "image_caption": [{"text": "部署拓扑图"}],
                     "bbox": [0, 50, 10, 60],
                 },
@@ -143,85 +148,79 @@ def test_mineru_pdf_loader_falls_back_to_same_page_asset_linking(tmp_path):
     assert documents[0].metadata["related_asset_keys"] == ["image-0"]
 
 
-def test_mineru_pdf_loader_invokes_default_cli_parser(monkeypatch, tmp_path):
+def test_mineru_pdf_loader_uses_precision_mode_when_token_is_available(monkeypatch, tmp_path):
     from app.ai.rag.ingest.loaders import mineru_pdf_loader
     from app.ai.rag.ingest.loaders.mineru_pdf_loader import MinerUPdfLoader
 
     pdf_path = tmp_path / "sample.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")
 
-    output_dir = tmp_path / "mineru-output"
-    output_dir.mkdir(parents=True)
-    content_list_path = output_dir / "sample_content_list.json"
-    content_list_path.write_text('{"content_list": [], "job_id": "job-cli"}', encoding="utf-8")
+    class FakeClient:
+        def __init__(self):
+            self.extract_called = False
+            self.flash_called = False
 
-    captured = {}
+        def extract(self, source, **kwargs):
+            self.extract_called = True
+            return SimpleNamespace(
+                task_id="task-1",
+                state="done",
+                markdown="# 标题",
+                content_list=[],
+                images=[],
+            )
 
-    def fake_run(command, check):
-        captured["command"] = command
-        return None
+        def flash_extract(self, source, **kwargs):
+            self.flash_called = True
+            raise AssertionError("flash_extract should not be called")
 
-    monkeypatch.setattr(mineru_pdf_loader.subprocess, "run", fake_run)
-    monkeypatch.setattr(MinerUPdfLoader, "_resolve_mineru_command", lambda self: ["mineru"])
-    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_BACKEND", "vlm-http-client")
-    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_SERVER_URL", "http://127.0.0.1:30000")
+    client = FakeClient()
+    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_API_MODE", "precision")
+    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_TOKEN", "secret-token")
 
-    loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets")
-    parsed = loader._run_mineru_cli(pdf_path, output_dir)
+    loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets", client_factory=lambda token: client)
+    parsed = loader._extract_with_sdk(pdf_path)
 
-    assert captured["command"][:2] == ["mineru", "-p"]
-    assert "-b" in captured["command"]
-    assert "vlm-http-client" in captured["command"]
-    assert "-u" in captured["command"]
-    assert "http://127.0.0.1:30000" in captured["command"]
-    assert parsed["job_id"] == "job-cli"
+    assert client.extract_called is True
+    assert parsed["job_id"] == "task-1"
+    assert parsed["content_list"][0]["text"] == "# 标题"
 
 
-def test_mineru_pdf_loader_finds_nested_content_list_json(monkeypatch, tmp_path):
+def test_mineru_pdf_loader_falls_back_to_flash_without_token(monkeypatch, tmp_path):
     from app.ai.rag.ingest.loaders import mineru_pdf_loader
     from app.ai.rag.ingest.loaders.mineru_pdf_loader import MinerUPdfLoader
 
     pdf_path = tmp_path / "sample.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")
 
-    nested_dir = tmp_path / "mineru-output" / "job-1"
-    nested_dir.mkdir(parents=True)
-    content_list_path = nested_dir / "sample_content_list.json"
-    content_list_path.write_text('{"content_list": [], "job_id": "job-nested"}', encoding="utf-8")
+    class FakeClient:
+        def __init__(self):
+            self.extract_called = False
+            self.flash_called = False
 
-    monkeypatch.setattr(
-        mineru_pdf_loader.subprocess,
-        "run",
-        lambda command, check: None,
-    )
-    monkeypatch.setattr(MinerUPdfLoader, "_resolve_mineru_command", lambda self: ["mineru"])
-    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_BACKEND", "vlm-http-client")
-    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_SERVER_URL", "http://127.0.0.1:30000")
+        def extract(self, source, **kwargs):
+            self.extract_called = True
+            raise AssertionError("extract should not be called")
 
-    loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets")
-    parsed = loader._run_mineru_cli(pdf_path, tmp_path / "mineru-output")
+        def flash_extract(self, source, **kwargs):
+            self.flash_called = True
+            return SimpleNamespace(
+                task_id="task-flash",
+                state="done",
+                markdown="flash markdown",
+                content_list=[],
+                images=[],
+            )
 
-    assert parsed["job_id"] == "job-nested"
+    client = FakeClient()
+    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_API_MODE", "precision")
+    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_TOKEN", None)
 
+    loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets", client_factory=lambda token: client)
+    parsed = loader._extract_with_sdk(pdf_path)
 
-def test_mineru_pdf_loader_requires_server_url_for_remote_mode(monkeypatch, tmp_path):
-    from app.ai.rag.ingest.loaders import mineru_pdf_loader
-    from app.ai.rag.ingest.loaders.mineru_pdf_loader import MinerUPdfLoader
-
-    pdf_path = tmp_path / "sample.pdf"
-    pdf_path.write_bytes(b"%PDF-1.4")
-
-    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_BACKEND", "vlm-http-client")
-    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_SERVER_URL", None)
-
-    loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets")
-
-    try:
-        loader._run_mineru_cli(pdf_path, tmp_path / "mineru-output")
-    except RuntimeError as exc:
-        assert "MINERU_SERVER_URL" in str(exc)
-    else:
-        raise AssertionError("Expected missing server url to raise RuntimeError")
+    assert client.flash_called is True
+    assert parsed["content_list"][0]["text"] == "flash markdown"
 
 
 def test_persistence_service_marks_job_succeeded_and_inserts_milvus_payload():
