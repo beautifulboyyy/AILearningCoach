@@ -163,11 +163,17 @@ def test_mineru_pdf_loader_invokes_default_cli_parser(monkeypatch, tmp_path):
 
     monkeypatch.setattr(mineru_pdf_loader.subprocess, "run", fake_run)
     monkeypatch.setattr(MinerUPdfLoader, "_resolve_mineru_command", lambda self: ["mineru"])
+    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_BACKEND", "vlm-http-client")
+    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_SERVER_URL", "http://127.0.0.1:30000")
 
     loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets")
     parsed = loader._run_mineru_cli(pdf_path, output_dir)
 
     assert captured["command"][:2] == ["mineru", "-p"]
+    assert "-b" in captured["command"]
+    assert "vlm-http-client" in captured["command"]
+    assert "-u" in captured["command"]
+    assert "http://127.0.0.1:30000" in captured["command"]
     assert parsed["job_id"] == "job-cli"
 
 
@@ -189,6 +195,8 @@ def test_mineru_pdf_loader_finds_nested_content_list_json(monkeypatch, tmp_path)
         lambda command, check: None,
     )
     monkeypatch.setattr(MinerUPdfLoader, "_resolve_mineru_command", lambda self: ["mineru"])
+    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_BACKEND", "vlm-http-client")
+    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_SERVER_URL", "http://127.0.0.1:30000")
 
     loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets")
     parsed = loader._run_mineru_cli(pdf_path, tmp_path / "mineru-output")
@@ -196,33 +204,24 @@ def test_mineru_pdf_loader_finds_nested_content_list_json(monkeypatch, tmp_path)
     assert parsed["job_id"] == "job-nested"
 
 
-def test_mineru_pdf_loader_adds_optional_source_flag(monkeypatch, tmp_path):
+def test_mineru_pdf_loader_requires_server_url_for_remote_mode(monkeypatch, tmp_path):
     from app.ai.rag.ingest.loaders import mineru_pdf_loader
     from app.ai.rag.ingest.loaders.mineru_pdf_loader import MinerUPdfLoader
 
     pdf_path = tmp_path / "sample.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")
 
-    output_dir = tmp_path / "mineru-output"
-    output_dir.mkdir(parents=True)
-    content_list_path = output_dir / "sample_content_list.json"
-    content_list_path.write_text('{"content_list": [], "job_id": "job-cli"}', encoding="utf-8")
-
-    captured = {}
-
-    def fake_run(command, check):
-        captured["command"] = command
-        return None
-
-    monkeypatch.setattr(mineru_pdf_loader.subprocess, "run", fake_run)
-    monkeypatch.setattr(MinerUPdfLoader, "_resolve_mineru_command", lambda self: ["mineru"])
-    monkeypatch.setenv("MINERU_MODEL_SOURCE", "modelscope")
+    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_BACKEND", "vlm-http-client")
+    monkeypatch.setattr(mineru_pdf_loader.settings, "MINERU_SERVER_URL", None)
 
     loader = MinerUPdfLoader(asset_root=tmp_path / "knowledge_assets")
-    loader._run_mineru_cli(pdf_path, output_dir)
 
-    assert "--source" in captured["command"]
-    assert "modelscope" in captured["command"]
+    try:
+        loader._run_mineru_cli(pdf_path, tmp_path / "mineru-output")
+    except RuntimeError as exc:
+        assert "MINERU_SERVER_URL" in str(exc)
+    else:
+        raise AssertionError("Expected missing server url to raise RuntimeError")
 
 
 def test_persistence_service_marks_job_succeeded_and_inserts_milvus_payload():

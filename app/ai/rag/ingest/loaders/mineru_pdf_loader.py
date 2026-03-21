@@ -2,7 +2,6 @@
 基于 MinerU 结构化结果的 PDF 加载器
 """
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,6 +9,7 @@ import sys
 
 from app.ai.rag.ingest.base import BaseDocumentLoader
 from app.ai.rag.ingest.models import IngestedAsset, IngestedDocument
+from app.core.config import settings
 from app.utils.logger import app_logger
 
 
@@ -137,22 +137,28 @@ class MinerUPdfLoader(BaseDocumentLoader):
         return self._run_mineru_cli(path, output_dir)
 
     def _run_mineru_cli(self, path: Path, output_dir: Path) -> dict:
-        model_source = os.getenv("MINERU_MODEL_SOURCE", "").strip()
+        backend = settings.MINERU_BACKEND.strip()
+        server_url = (settings.MINERU_SERVER_URL or "").strip()
+
+        if backend not in {"vlm-http-client", "hybrid-http-client"}:
+            raise RuntimeError(f"Unsupported MinerU backend for remote mode: {backend}")
+        if not server_url:
+            raise RuntimeError("MINERU_SERVER_URL is not configured for remote PDF parsing")
+
         command = self._resolve_mineru_command() + [
             "-p",
             str(path),
             "-o",
             str(output_dir),
             "-b",
-            "pipeline",
+            backend,
+            "-u",
+            server_url,
         ]
-        if model_source:
-            command.extend(["--source", model_source])
 
-        app_logger.info(f"开始使用 MinerU 解析 PDF: {path.name}")
-        app_logger.info("MinerU 本地 pipeline 模式不需要 API Key；首次运行可能下载或初始化模型，请耐心等待。")
-        if model_source:
-            app_logger.info(f"MinerU 模型源: {model_source}")
+        app_logger.info(f"开始使用 MinerU 远端解析 PDF: {path.name}")
+        app_logger.info(f"MinerU backend: {backend}")
+        app_logger.info(f"MinerU server: {server_url}")
 
         subprocess.run(
             command,

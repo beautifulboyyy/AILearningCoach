@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     DASHSCOPE_API_KEY: str
     EMBEDDING_MODEL: str = "text-embedding-v3"
     EMBEDDING_DIMENSION: int = 1024
+
+    # MinerU 远端解析配置
+    MINERU_BACKEND: str = "vlm-http-client"
+    MINERU_SERVER_URL: Optional[str] = None
     
     # JWT配置
     SECRET_KEY: str
