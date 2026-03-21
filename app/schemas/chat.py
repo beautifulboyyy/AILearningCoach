@@ -23,9 +23,11 @@ class ChatRequest(BaseModel):
 
 class Source(BaseModel):
     """知识来源"""
-    lecture: str = Field(..., description="讲义编号")
-    section: Optional[str] = Field(None, description="章节")
-    title: Optional[str] = Field(None, description="标题")
+    document_name: str = Field(..., description="文档名")
+    file_type: str = Field(..., description="文件类型")
+    page: Optional[int] = Field(None, description="页码")
+    source_path: str = Field(..., description="来源路径")
+    assets: List[Dict[str, Any]] = Field(default_factory=list, description="关联资产列表")
     text: str = Field(..., description="来源文本描述")
 
 

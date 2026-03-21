@@ -234,7 +234,7 @@ class RAGGenerator:
 
         app_logger.info("完成流式答案生成")
     
-    def _extract_sources(self, results: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    def _extract_sources(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         提取来源信息
         
@@ -246,23 +246,14 @@ class RAGGenerator:
         """
         sources = []
         for result in results:
-            metadata = result.get("metadata", {})
-            lecture = metadata.get("lecture_number", "未知")
-            section = metadata.get("section", "")
-            title = metadata.get("title", "")
-            
-            source_text = f"讲{lecture}"
-            if section:
-                source_text += f"-第{section}节"
-            if title:
-                source_text += f": {title}"
-            
-            sources.append({
-                "lecture": str(lecture),
-                "section": section,
-                "title": title,
-                "text": source_text
-            })
+            source = dict(result.get("source", {}))
+            document_name = source.get("document_name", "未知文档")
+            page = source.get("page")
+            source["text"] = f"{document_name} (p.{page})" if page is not None else document_name
+            source.setdefault("file_type", "unknown")
+            source.setdefault("source_path", "")
+            source.setdefault("assets", [])
+            sources.append(source)
         
         return sources
 
