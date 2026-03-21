@@ -7,7 +7,23 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-ENV_FILE = BASE_DIR / ".env"
+
+
+def resolve_env_file() -> Path:
+    """优先读取当前工作区 .env，找不到时回退主仓库根目录。"""
+    local_env = BASE_DIR / ".env"
+    if local_env.exists():
+        return local_env
+
+    for parent in BASE_DIR.parents:
+        candidate = parent / ".env"
+        if candidate.exists():
+            return candidate
+
+    return local_env
+
+
+ENV_FILE = resolve_env_file()
 
 
 class Settings(BaseSettings):

@@ -42,7 +42,10 @@ class IngestPipeline:
         async with async_session_maker() as session:
             persistence = PersistenceService(session=session, milvus=milvus_client)
             for file_path in candidate_files:
-                await self.ingest_file(file_path, persistence)
+                try:
+                    await self.ingest_file(file_path, persistence)
+                except Exception as exc:
+                    app_logger.error(f"Failed to ingest file {file_path}: {exc}")
 
     async def ingest_file(self, file_path: Path, persistence: PersistenceService) -> None:
         source_path = self.normalize_source_path(file_path)
