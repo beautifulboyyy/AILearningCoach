@@ -1,0 +1,131 @@
+"""
+基于 MinerU 结构化结果的 PDF 加载器
+"""
+from pathlib import Path
+import shutil
+
+from app.ai.rag.ingest.base import BaseDocumentLoader
+from app.ai.rag.ingest.models import IngestedAsset, IngestedDocument
+
+
+class MinerUPdfLoader(BaseDocumentLoader):
+    """将 MinerU 的结构化输出映射为统一摄取文档"""
+
+    supported_extensions = {".pdf"}
+
+    def __init__(self, asset_root: Path | None = None, parser=None):
+        self.asset_root = Path(asset_root) if asset_root is not None else Path("data/knowledge_assets")
+        self.parser = parser or self._missing_parser
+
+    async def load(self, path: Path) -> list[IngestedDocument]:
+        parsed = self.parser(path)
+        job_id = parsed.get("job_id", "job")
+        content_list = parsed.get("content_list", [])
+
+        assets = self._extract_assets(path, job_id, content_list)
+        documents: list[IngestedDocument] = []
+
+        for index, item in enumerate(content_list):
+            if item.get("type") not in {"text", "table", "equation"}:
+                continue
+
+            content = self._extract_text_content(item)
+            if not content:
+                continue
+
+            related_assets = self._resolve_related_assets(index, item, content_list, assets)
+            documents.append(
+                IngestedDocument(
+                    source_path=str(path),
+                    file_name=path.name,
+                    file_type="pdf",
+                    content=content,
+                    loader_name="mineru",
+                    page_start=item.get("page_idx"),
+                    page_end=item.get("page_idx"),
+                    metadata={
+                        "page_idx": item.get("page_idx"),
+                        "related_asset_keys": [asset.asset_key for asset in related_assets],
+                    },
+                    assets=related_assets,
+                )
+            )
+
+        return documents
+
+    def _extract_assets(self, path: Path, job_id: str, content_list: list[dict]) -> list[IngestedAsset]:
+        assets: list[IngestedAsset] = []
+        relative_root = Path(path.stem) / job_id
+        target_root = self.asset_root / relative_root
+        target_root.mkdir(parents=True, exist_ok=True)
+
+        image_index = 0
+        for item in content_list:
+            if item.get("type") != "image":
+                continue
+
+            source_image_path = Path(item["img_path"])
+            target_path = target_root / source_image_path.name
+            shutil.copy2(source_image_path, target_path)
+
+            caption = self._extract_caption(item)
+            assets.append(
+                IngestedAsset(
+                    asset_key=f"image-{image_index}",
+                    asset_type="image",
+                    page_idx=item.get("page_idx"),
+                    asset_path=str((relative_root / source_image_path.name).as_posix()),
+                    caption=caption,
+                    metadata={"bbox": item.get("bbox")},
+                )
+            )
+            image_index += 1
+
+        return assets
+
+    def _resolve_related_assets(
+        self,
+        index: int,
+        item: dict,
+        content_list: list[dict],
+        assets: list[IngestedAsset],
+    ) -> list[IngestedAsset]:
+        page_idx = item.get("page_idx")
+        adjacent_pages: list[int] = []
+
+        for neighbor_index in (index - 1, index + 1):
+            if 0 <= neighbor_index < len(content_list):
+                neighbor = content_list[neighbor_index]
+                if neighbor.get("type") == "image" and neighbor.get("page_idx") == page_idx:
+                    adjacent_pages.append(neighbor_index)
+
+        if adjacent_pages:
+            same_page_assets = [asset for asset in assets if asset.page_idx == page_idx]
+            return same_page_assets
+
+        return [asset for asset in assets if asset.page_idx == page_idx]
+
+    @staticmethod
+    def _extract_caption(item: dict) -> str | None:
+        raw_caption = item.get("image_caption")
+        if isinstance(raw_caption, list):
+            parts = [part.get("text", "").strip() for part in raw_caption if isinstance(part, dict)]
+            caption = "".join(part for part in parts if part)
+            return caption or None
+        if isinstance(raw_caption, str):
+            return raw_caption.strip() or None
+        return None
+
+    @staticmethod
+    def _extract_text_content(item: dict) -> str:
+        if isinstance(item.get("text"), str):
+            return item["text"].strip()
+        if isinstance(item.get("latex"), str):
+            return item["latex"].strip()
+        if isinstance(item.get("html"), str):
+            return item["html"].strip()
+        return ""
+
+    @staticmethod
+    def _missing_parser(path: Path):
+        raise RuntimeError(f"MinerU parser is not configured for: {path}")
