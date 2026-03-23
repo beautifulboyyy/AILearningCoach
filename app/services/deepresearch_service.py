@@ -16,6 +16,7 @@ from app.models.deepresearch import (
     DeepResearchTaskStatus,
 )
 from app.models.user import User
+from app.schemas.deepresearch import DeepResearchAnalyst, DeepResearchTaskDetail
 
 
 class DeepResearchConflictError(Exception):
@@ -125,6 +126,21 @@ class DeepResearchService:
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_task_for_execution(
+        self,
+        task_id: int,
+        db: AsyncSession,
+        expected_status: str | None = None,
+    ) -> Optional[DeepResearchTask]:
+        """为异步任务读取任务，并可选校验预期状态。"""
+        result = await db.execute(select(DeepResearchTask).where(DeepResearchTask.id == task_id))
+        task = result.scalar_one_or_none()
+        if task is None:
+            return None
+        if expected_status is not None and task.status.value != expected_status:
+            return None
+        return task
 
     async def finalize_analyst_revision(
         self,
@@ -259,6 +275,157 @@ class DeepResearchService:
             .order_by(DeepResearchTask.created_at.desc())
         )
         return list(result.scalars().all())
+
+    async def get_task_detail(
+        self,
+        task_id: int,
+        user_id: int,
+        db: AsyncSession,
+    ) -> DeepResearchTaskDetail:
+        """获取任务详情。"""
+        task = await self.get_task(task_id=task_id, user_id=user_id, db=db)
+        if task is None:
+            raise DeepResearchNotFoundError("DeepResearch 任务不存在")
+
+        revision_number = task.selected_revision or task.current_revision
+        analysts: list[DeepResearchAnalyst] = []
+        if revision_number:
+            result = await db.execute(
+                select(DeepResearchAnalystRevision).where(
+                    DeepResearchAnalystRevision.task_id == task_id,
+                    DeepResearchAnalystRevision.revision_number == revision_number,
+                )
+            )
+            revision = result.scalar_one_or_none()
+            if revision and revision.analysts_json:
+                analysts = [DeepResearchAnalyst.model_validate(item) for item in revision.analysts_json]
+
+        return DeepResearchTaskDetail(
+            id=task.id,
+            user_id=task.user_id,
+            topic=task.topic,
+            requirements=task.requirements,
+            status=task.status,
+            phase=task.phase,
+            progress_percent=task.progress_percent,
+            progress_message=task.progress_message,
+            current_revision=task.current_revision,
+            feedback_round_used=task.feedback_round_used,
+            max_feedback_rounds=task.max_feedback_rounds,
+            selected_revision=task.selected_revision,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            remaining_feedback_rounds=self.calculate_remaining_feedback_rounds(
+                current_revision=task.current_revision,
+                max_feedback_rounds=task.max_feedback_rounds,
+            ),
+            analysts=analysts,
+            report_available=bool(task.final_report_markdown),
+            error_message=task.error_message,
+        )
+
+    async def get_selected_analysts(
+        self,
+        task_id: int,
+        selected_revision: int,
+        db: AsyncSession,
+    ) -> list[dict[str, Any]]:
+        """读取被锁定 revision 的分析师列表。"""
+        result = await db.execute(
+            select(DeepResearchAnalystRevision).where(
+                DeepResearchAnalystRevision.task_id == task_id,
+                DeepResearchAnalystRevision.revision_number == selected_revision,
+            )
+        )
+        revision = result.scalar_one_or_none()
+        if revision is None:
+            raise DeepResearchConflictError("选定的分析师版本不存在")
+        return revision.analysts_json or []
+
+    async def finalize_research_run(
+        self,
+        task_id: int,
+        selected_revision: int,
+        final_report: str,
+        sources: list[dict[str, Any]],
+        db: AsyncSession,
+    ) -> Optional[dict[str, Any]]:
+        """写回正式研究结果。"""
+        task = await self.get_task_for_execution(
+            task_id=task_id,
+            db=db,
+            expected_status=DeepResearchTaskStatus.RUNNING_RESEARCH.value,
+        )
+        if task is None or task.selected_revision != selected_revision:
+            return None
+
+        result = await db.execute(
+            select(DeepResearchRun).where(
+                DeepResearchRun.task_id == task_id,
+                DeepResearchRun.revision_number == selected_revision,
+            )
+        )
+        run = result.scalar_one_or_none()
+        if run is None:
+            run = DeepResearchRun(
+                task_id=task_id,
+                revision_number=selected_revision,
+            )
+            db.add(run)
+
+        run.status = "completed"
+        run.progress_percent = 100
+        run.progress_message = "报告已生成"
+        run.result_json = {"sources": sources}
+        task.status = DeepResearchTaskStatus.COMPLETED
+        task.phase = DeepResearchPhase.REPORT_FINALIZATION
+        task.progress_percent = 100
+        task.progress_message = "报告已生成"
+        task.final_report_markdown = final_report
+
+        await db.commit()
+        await db.refresh(task)
+        return {"status": "completed", "task_id": task_id}
+
+    async def mark_task_failed(
+        self,
+        task_id: int,
+        message: str,
+        db: AsyncSession,
+    ) -> None:
+        """标记任务失败。"""
+        task = await self.get_task_for_execution(task_id=task_id, db=db)
+        if task is None:
+            return
+        task.status = DeepResearchTaskStatus.FAILED
+        task.error_message = message
+        task.progress_message = "任务执行失败"
+
+        result = await db.execute(
+            select(DeepResearchRun)
+            .where(DeepResearchRun.task_id == task_id)
+            .order_by(DeepResearchRun.created_at.desc())
+        )
+        run = result.scalars().first()
+        if run is not None:
+            run.status = "failed"
+            run.error_message = message
+
+        await db.commit()
+
+    async def get_report(
+        self,
+        task_id: int,
+        user_id: int,
+        db: AsyncSession,
+    ) -> str:
+        """获取最终报告。"""
+        task = await self.get_task(task_id=task_id, user_id=user_id, db=db)
+        if task is None:
+            raise DeepResearchNotFoundError("DeepResearch 任务不存在")
+        if not task.final_report_markdown:
+            raise DeepResearchConflictError("研究尚未完成，暂无报告")
+        return task.final_report_markdown
 
 
 deepresearch_service = DeepResearchService()

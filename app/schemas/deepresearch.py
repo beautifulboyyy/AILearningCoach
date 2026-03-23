@@ -38,6 +38,12 @@ class DeepResearchFeedbackCreate(BaseModel):
         return cleaned
 
 
+class DeepResearchStartRequest(BaseModel):
+    """启动研究请求"""
+
+    selected_revision: int = Field(..., ge=1)
+
+
 class DeepResearchAnalystRevisionResponse(BaseModel):
     """分析师版本响应"""
 
@@ -78,6 +84,13 @@ class DeepResearchTaskDetail(DeepResearchTaskSummary):
     analysts: List[DeepResearchAnalyst] = Field(default_factory=list)
     report_available: bool
     error_message: Optional[str] = None
+
+
+class DeepResearchTaskListResponse(BaseModel):
+    """任务列表响应"""
+
+    tasks: List[DeepResearchTaskSummary]
+    total: int
 
 
 class DeepResearchReportResponse(BaseModel):

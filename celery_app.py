@@ -10,7 +10,7 @@ celery_app = Celery(
     "ai_learning_coach",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.periodic", "app.tasks.async_tasks"]
+    include=["app.tasks.periodic", "app.tasks.async_tasks", "app.tasks.deepresearch_tasks"]
 )
 
 # Celery配置

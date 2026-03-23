@@ -15,7 +15,7 @@ class DeepResearchRunner:
 
     def __init__(self, llm_client: Any = None, search_service: Any = None):
         self.llm_client = llm_client or llm
-        self.search_service = search_service or DeepResearchSearchAdapter()
+        self.search_service = search_service or DeepResearchSearchAdapter.from_settings()
 
     async def search(self, query: str) -> List[dict]:
         return await self.search_service.search(query)
