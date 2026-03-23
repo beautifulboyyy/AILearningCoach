@@ -51,7 +51,7 @@ class TavilySearchClient:
 class BochaSearchClient:
     """博查搜索客户端"""
 
-    def __init__(self, api_key: str, base_url: str = "https://api.bochaai.com/v1/web-search"):
+    def __init__(self, api_key: str, base_url: str = "https://api.bocha.cn/v1/web-search"):
         self.api_key = api_key
         self.base_url = base_url
 
@@ -70,8 +70,9 @@ class BochaSearchClient:
             response.raise_for_status()
             data = response.json()
 
+        search_payload = data.get("data", data)
         normalized: list[dict] = []
-        for item in data.get("webPages", {}).get("value", []):
+        for item in search_payload.get("webPages", {}).get("value", []):
             normalized.append(
                 {
                     "title": item.get("name", ""),
