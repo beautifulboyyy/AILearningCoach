@@ -29,6 +29,11 @@
         <template #title>智能对话</template>
       </el-menu-item>
       
+      <el-menu-item index="/deepresearch">
+        <el-icon><Connection /></el-icon>
+        <template #title>深度研究</template>
+      </el-menu-item>
+
       <el-menu-item index="/learning-path">
         <el-icon><TrendCharts /></el-icon>
         <template #title>学习路径</template>
@@ -57,7 +62,7 @@ import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { 
   Reading, HomeFilled, ChatDotRound, TrendCharts, 
-  List, DataAnalysis, User 
+  List, DataAnalysis, User, Connection
 } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 

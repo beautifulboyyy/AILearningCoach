@@ -34,6 +34,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '智能对话' }
       },
       {
+        path: 'deepresearch',
+        name: 'DeepResearch',
+        component: () => import('@/views/deepresearch/DeepResearchView.vue'),
+        meta: { title: '深度研究' }
+      },
+      {
+        path: 'deepresearch/:taskId/report',
+        name: 'DeepResearchReport',
+        component: () => import('@/views/deepresearch/DeepResearchReportView.vue'),
+        meta: { title: '研究报告' }
+      },
+      {
         path: 'learning-path',
         name: 'LearningPath',
         component: () => import('@/views/learning-path/PathView.vue'),
