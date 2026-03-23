@@ -53,6 +53,7 @@
 - **先稳后全：** 第一版优先实现稳定的业务状态机，不依赖复杂的工作流恢复机制。
 - **有限交互：** 人工反馈只发生在分析师确认前，正式研究开始后冻结输入。
 - **长期保存：** 研究任务、分析师版本、最终报告均持久化。
+- **搜索固定化：** 第一版搜索层固定采用 Tavily API 与博查 API 双供应商方案，不做通用多供应商抽象。
 - **可扩展：** 后续可以继续扩展 SSE 推送、报告导出、更多人工干预节点。
 
 ## 5. 总体方案
@@ -103,13 +104,31 @@
 
 规则如下：
 
-- 最多允许 3 轮反馈。
+- 首版分析师草案 `revision_number = 1`，它是系统初始生成结果，不计入反馈轮次。
+- 最多允许 3 轮反馈，指最多允许 3 次成功调用反馈接口并生成新 revision。
 - 每轮反馈只接受一段自然语言。
 - 每轮反馈基于当前任务上下文重新生成一组分析师草案。
 - 用户不能直接修改分析师的字段值。
 - 正式研究开始后，不再允许修改分析师。
 
 这种设计可以在保留人机协同价值的同时，显著降低前后端复杂度。
+
+### 6.3 反馈计数规则
+
+为避免前后端、数据库和任务逻辑出现 off-by-one，第一版明确采用以下计数口径：
+
+- `revision_number = 1` 表示初始草案，不计入反馈轮次。
+- 每次 `POST /deepresearch/tasks/{id}/feedback` 成功受理后，都会创建一个新的 analyst revision，并使 `feedback_round_used += 1`。
+- `feedback_round_used` 的计算公式为：`current_revision - 1`。
+- `remaining_feedback_rounds` 的计算公式为：`max_feedback_rounds - feedback_round_used`。
+- 当 `feedback_round_used >= max_feedback_rounds` 时，禁止再次提交反馈。
+- 详情接口返回的“当前反馈轮次”字段，统一表示 `feedback_round_used`，而不是 `current_revision`。
+
+示例：
+
+- 初始生成完成后：`current_revision = 1`，`feedback_round_used = 0`，`remaining_feedback_rounds = 3`
+- 第 1 次反馈完成后：`current_revision = 2`，`feedback_round_used = 1`，`remaining_feedback_rounds = 2`
+- 第 3 次反馈完成后：`current_revision = 4`，`feedback_round_used = 3`，`remaining_feedback_rounds = 0`
 
 ## 7. 状态机设计
 
@@ -125,7 +144,6 @@
 | `running_research` | 已确认分析师，正在执行正式研究 |
 | `completed` | 研究已完成 |
 | `failed` | 执行失败 |
-| `cancelled` | 用户取消或系统终止 |
 
 ### 7.2 阶段字段
 
@@ -148,8 +166,12 @@ pending
     -> running_research       (确认并启动研究)
   -> completed
   -> failed
-  -> cancelled
 ```
+
+说明：
+
+- 第一版不支持显式取消任务，因此不在可达状态中保留 `cancelled`。
+- 如后续需要增加取消能力，应同时补充取消接口、worker 协作式停止规则和结果写回约束，再将 `cancelled` 状态引入状态机。
 
 ## 8. 数据模型设计
 
@@ -172,8 +194,9 @@ pending
 | `progress_percent` | int | 进度百分比 |
 | `progress_message` | varchar | 当前进度文案 |
 | `current_revision` | int | 当前分析师版本号 |
+| `feedback_round_used` | int | 已使用反馈轮次，公式为 `current_revision - 1` |
 | `max_feedback_rounds` | int | 最大反馈轮数，默认 3 |
-| `selected_revision` | int | 被确认用于正式研究的版本号，可为空 |
+| `selected_revision` | int | 被确认用于正式研究的版本号，可为空；它是“最终选中 revision”的唯一权威字段 |
 | `final_report_markdown` | long text | 最终 Markdown 报告 |
 | `final_report_summary` | text | 报告摘要，可选 |
 | `error_message` | text | 失败原因 |
@@ -186,6 +209,8 @@ pending
 
 - 作为任务列表和详情页的主数据源。
 - 提供当前状态、阶段、当前版本和最终结果。
+- 提供反馈轮次与剩余反馈次数的统一口径。
+- 作为“当前被锁定用于正式研究的 revision”的唯一权威来源。
 
 ### 8.2 `deep_research_analyst_revisions`
 
@@ -208,6 +233,7 @@ pending
 - 保存分析师草案的完整版本历史。
 - 支撑用户回看每一轮分析师调整结果。
 - 为正式研究提供最终被锁定的分析师输入。
+- `is_selected` 只是冗余展示字段，不能替代 `deep_research_tasks.selected_revision` 作为权威来源。
 
 ### 8.3 `deep_research_runs`
 
@@ -294,8 +320,8 @@ pending
 - 当前状态与阶段
 - 当前分析师版本
 - 当前分析师列表
-- 当前反馈轮次
-- 剩余反馈次数
+- 当前反馈轮次（`feedback_round_used`）
+- 剩余反馈次数（`remaining_feedback_rounds`）
 - 最终报告是否可用
 - 错误信息
 
@@ -319,6 +345,7 @@ pending
 接口约束：
 
 - 只有 `waiting_feedback` 状态可调用。
+- `feedback_round_used < max_feedback_rounds` 时才可调用。
 - 超过最大反馈轮数时返回业务错误。
 - 已进入 `running_research`、`completed` 或 `failed` 状态时不可调用。
 
@@ -345,6 +372,26 @@ pending
 
 - 返回最终 Markdown 报告全文。
 - 如果任务尚未完成，则返回明确状态提示。
+
+### 9.7 并发限制
+
+为控制队列占用和模型成本，第一版在创建任务接口增加用户级并发限制：
+
+- 同一用户在任意时刻最多只允许存在 1 个处于 `drafting_analysts` 或 `running_research` 状态的任务。
+- 如果用户已有进行中的 DeepResearch 任务，`POST /deepresearch/tasks` 返回业务错误。
+- `waiting_feedback` 状态不计入运行中并发，因为此时不占用后台执行资源。
+- 后续如需要放宽限制，可扩展为按用户套餐或角色配置。
+
+仅有“先查询再拒绝”的应用层校验并不足够，第一版必须增加数据库级或事务级防并发方案，防止两个并发创建请求同时穿透限制。
+
+建议实现约束如下：
+
+- `create_task` 必须在事务中执行。
+- 在同一事务内，对“当前用户”做并发串行化保护，至少满足以下两种方式之一：
+  - 对用户维度加锁（例如基于用户行的 `SELECT ... FOR UPDATE`，或专门的用户级占位锁记录）
+  - 引入可落地的唯一约束 / 锁表机制，确保同一用户同一时刻最多只能成功创建一个运行中任务
+- 不接受单纯“先查 running task，再 insert”且无锁的实现。
+- 若事务提交时发现约束冲突，应返回明确的业务错误，而不是产生两条同时运行的任务。
 
 ## 10. 模块边界设计
 
@@ -416,7 +463,31 @@ pending
 - 承接从原型中迁移出来的 LangGraph / LLM / 搜索逻辑。
 - 与 API、数据库、Celery 解耦。
 
-### 10.6 Task 层
+### 10.6 搜索层约束
+
+第一版搜索层不做“任意搜索供应商可插拔”设计，而是明确固定为以下双供应商：
+
+- Tavily API
+- 博查 API
+
+设计要求如下：
+
+- `.env` 中显式配置：
+  - `TAVILY_API_KEY`
+  - `BOCHA_API_KEY`
+- 由 `app/ai/deepresearch/search.py` 统一封装两个搜索客户端。
+- 搜索适配层对上只暴露项目内部统一的数据结构，不向 runner 透出供应商差异。
+- 第一版建议优先查询 Tavily，再查询博查；也可以并发查询后在适配层统一归并，但必须在实现时固定策略，避免线上行为不一致。
+- 供应商返回结果在进入 workflow 前统一转换为标准结构，例如：
+  - `title`
+  - `url`
+  - `content`
+  - `source`
+  - `provider`
+- 若单一供应商失败，允许使用另一供应商结果继续执行。
+- 若两个供应商都失败，允许研究流程降级继续，但必须记录 warning，并在相关 section / report 生成中处理空来源场景。
+
+### 10.7 Task 层
 
 建议新增：
 
@@ -424,8 +495,10 @@ pending
 
 建议包含两个主要 Celery 任务：
 
-- `generate_analysts_task(task_id: int)`
-- `run_deepresearch_task(task_id: int)`
+- `generate_analysts_task(task_id: int, expected_revision: int, expected_status: str)`
+- `run_deepresearch_task(task_id: int, selected_revision: int, expected_status: str)`
+
+所有 Celery 任务都必须遵循“显式版本绑定 + 预期状态校验 + stale task 丢弃”原则，不能只依赖 `task_id` 执行。
 
 ## 11. AI 工作流改造方案
 
@@ -454,6 +527,8 @@ generate_analysts(topic, requirements, max_analysts, feedback_history)
 run_research(topic, selected_analysts, run_context)
 ```
 
+5. 将原型中的单一 Web 搜索逻辑替换为 Tavily API 与博查 API 的双搜索源适配层。
+
 ### 11.3 为什么拆成两个入口
 
 这样拆分后：
@@ -462,9 +537,128 @@ run_research(topic, selected_analysts, run_context)
 - 正式研究阶段是长任务，职责单一。
 - 中间由业务状态机承接人工反馈，更符合项目当前后端架构。
 
-## 12. 进度与错误处理
+### 11.4 搜索执行策略
 
-### 12.1 进度展示
+第一版明确采用固定搜索策略，而不是由实现者临时决定：
+
+- analyst 访谈中的搜索请求统一通过 `DeepResearchSearchService` 发起。
+- 服务内部接入 Tavily API 与博查 API。
+- 默认策略建议为：
+  - 先调用 Tavily
+  - 再调用博查
+  - 将结果按 URL 去重后合并
+  - 截断到 workflow 需要的最大来源数
+- 每条来源都保留 `provider` 字段，便于日志、排障和后续效果分析。
+- 两个供应商都失败时，workflow 继续执行，但会在任务日志和 run 记录中留下搜索降级痕迹。
+
+## 12. Celery 幂等与过期任务防护
+
+第一版必须把 Celery 的重复投递、人工重试、worker 重启后重复消费视为常态，而不是异常。所有异步任务都需要具备幂等性和过期任务防护能力。
+
+### 12.1 任务参数要求
+
+建议任务签名如下：
+
+```python
+generate_analysts_task(
+    task_id: int,
+    expected_revision: int,
+    expected_status: str = "drafting_analysts",
+)
+
+run_deepresearch_task(
+    task_id: int,
+    selected_revision: int,
+    expected_status: str = "running_research",
+)
+```
+
+参数语义如下：
+
+- `task_id`：业务任务主键。
+- `expected_revision`：本次 analyst 生成任务预期要产出的 revision 编号。
+- `selected_revision`：正式研究绑定的 analyst 版本，启动后不可漂移。
+- `expected_status`：任务开始执行前要求数据库主记录所处的状态。
+
+### 12.2 Analyst 生成任务的校验规则
+
+`generate_analysts_task` 执行前必须校验：
+
+- 当前任务状态仍为 `drafting_analysts`
+- 当前任务的 `current_revision + 1 == expected_revision`，或者在刚创建任务时满足“下一版待生成”的约定
+- 任务尚未 `completed` 或 `failed`
+
+执行完成准备写回时，必须再次做 compare-and-set 式校验：
+
+- 目标任务仍处于本次任务可写回的状态
+- 数据库中的 revision 游标没有被更新到更新的版本
+
+如果任一校验失败，则将该 Celery 任务标记为 `stale task` 并直接丢弃，不写回数据库，不覆盖新状态。
+
+### 12.3 正式研究任务的校验规则
+
+`run_deepresearch_task` 执行前必须校验：
+
+- 当前任务状态仍为 `running_research`
+- 当前任务的 `selected_revision == selected_revision`
+- 对应 revision 的 analyst 数据存在且已被锁定
+
+执行完成准备写回时，必须再次校验：
+
+- 任务仍处于 `running_research`
+- `selected_revision` 未被修改
+
+如校验失败，视为 `stale task`，不得写回最终报告或覆盖错误状态。
+
+### 12.4 幂等语义
+
+第一版要求以下行为具备幂等性：
+
+- 同一个 analyst 生成任务重复消费时，最多只生成并写回 1 次目标 revision。
+- 同一个正式研究任务重复消费时，最多只写回 1 次最终报告。
+- 已完成的任务重复执行时，必须安全退出，不得重复覆盖完成结果。
+
+### 12.5 服务层配合要求
+
+为支持 Celery 幂等与 stale task 丢弃，service 层需要提供显式的原子更新方法，例如：
+
+- 按 `task_id + expected_status + expected_revision` 更新状态
+- 按 `task_id + selected_revision` 锁定正式研究输入
+- 写回前再次比较当前任务状态与 revision
+- 在 `create_task` 中对用户维度执行事务级并发保护，避免“双创建请求同时通过”的竞态
+
+实现层可使用数据库事务、行级锁或 compare-and-set 风格的条件更新语句来保证一致性。
+
+## 13. Selected Revision 一致性规则
+
+第一版必须避免 `deep_research_tasks.selected_revision` 与 `deep_research_analyst_revisions.is_selected` 形成“双重真相”。
+
+规则如下：
+
+- `deep_research_tasks.selected_revision` 是“当前最终选中 revision”的唯一权威字段。
+- `deep_research_analyst_revisions.is_selected` 只是冗余展示字段，用于详情接口和审计展示。
+- 任何读取“当前被选中的 analyst revision”时，应优先读取 `deep_research_tasks.selected_revision`，再回查对应 revision 记录。
+- 不允许仅更新 `is_selected` 而不更新 `selected_revision`。
+- 不允许通过查询 `is_selected = true` 来反推出当前任务的权威选中版本。
+
+启动正式研究时，必须在同一事务内完成以下操作：
+
+1. 校验当前任务状态为 `waiting_feedback`
+2. 校验目标 `revision_number` 存在
+3. 将任务表的 `selected_revision` 更新为目标 revision
+4. 将该任务下其他 revision 的 `is_selected` 批量置为 `false`
+5. 将目标 revision 的 `is_selected` 置为 `true`
+6. 将任务状态推进到 `running_research`
+
+事务完成后，必须满足：
+
+- 同一任务最多只有一条 revision 记录满足 `is_selected = true`
+- 若 `selected_revision` 非空，则必然存在且仅存在一个 matching revision 的 `is_selected = true`
+- 若发生事务失败，则两者都不应部分更新
+
+## 14. 进度与错误处理
+
+### 14.1 进度展示
 
 第一版不实现 SSE，但应在数据库中维护基础进度信息，供前端轮询展示。
 
@@ -481,7 +675,7 @@ run_research(topic, selected_analysts, run_context)
 - `正在整合研究结果`
 - `报告已生成`
 
-### 12.2 错误处理
+### 14.2 错误处理
 
 当任务失败时：
 
@@ -490,7 +684,7 @@ run_research(topic, selected_analysts, run_context)
 - 对正式研究阶段的失败，同步更新 `deep_research_runs`
 - 保留已经生成的分析师版本和历史记录，便于排障和后续重试
 
-## 13. 权限与安全
+## 15. 权限与安全
 
 第一版沿用现有用户鉴权机制：
 
@@ -502,40 +696,55 @@ run_research(topic, selected_analysts, run_context)
 
 - 限制 topic 与 feedback 的最大长度，防止超长输入。
 - 对正式研究任务设置 Celery 超时与重试策略。
-- 对外部搜索失败做降级处理，避免单点失败导致整个任务不可用。
+- 对 Tavily API 与博查 API 的失败做分级降级处理，避免单点失败导致整个任务不可用。
+- 对创建任务接口增加用户级并发限制，避免单个用户持续占满研究队列。
+- 对 `.env` 中的 `TAVILY_API_KEY` 与 `BOCHA_API_KEY` 缺失情况做启动期或运行期显式校验。
 
-## 14. 测试策略
+## 16. 测试策略
 
 第一版建议覆盖以下层次的测试。
 
-### 14.1 单元测试
+### 16.1 单元测试
 
 覆盖内容：
 
 - 状态机流转校验
 - 反馈轮数限制
+- feedback 计数公式与剩余次数计算
 - 任务启动条件校验
+- stale task 丢弃逻辑
+- 幂等重复执行校验
 - 任务详情序列化
+- Tavily 与博查结果归一化、去重与降级逻辑
+- 并发创建请求下的用户级互斥保护
+- `selected_revision` 与 `is_selected` 的事务内一致性
 
-### 14.2 集成测试
+### 16.2 集成测试
 
 覆盖内容：
 
 - 创建任务后是否成功投递分析师任务
 - 提交反馈后是否正确生成新 revision
 - 启动正式研究后是否锁定 selected revision
+- 旧的 analyst 任务延迟执行时是否被正确丢弃
+- 旧的 research 任务重复执行时是否不会覆盖新状态
+- Tavily 失败但博查成功时是否仍能完成研究流程
+- Tavily 与博查都失败时是否进入降级路径而非直接崩溃
 - 正式研究完成后是否正确落库报告
+- 并发发送两个创建请求时是否最多只成功一个
+- 启动研究后是否只有一个 revision 被标记为 `is_selected = true`
 
-### 14.3 API 测试
+### 16.3 API 测试
 
 覆盖内容：
 
 - 鉴权校验
 - 只能访问自己的任务
 - 非法状态下调用 `feedback/start` 的错误响应
+- 超过用户并发限制时创建任务的错误响应
 - 未完成任务获取报告时的返回行为
 
-## 15. 演进路线
+## 17. 演进路线
 
 在第一版稳定后，可继续考虑以下扩展：
 
@@ -543,9 +752,10 @@ run_research(topic, selected_analysts, run_context)
 - 支持报告导出为 PDF 或富文本。
 - 支持报告分享和历史版本比较。
 - 为正式研究阶段增加更细的中间产物可视化。
+- 如需支持取消，补充 `/tasks/{id}/cancel` 接口和 worker 协作式停止机制。
 - 评估是否需要引入 LangGraph 持久化 checkpoint，以支持更多人工干预节点。
 
-## 16. 推荐实施顺序
+## 18. 推荐实施顺序
 
 建议按如下顺序实施：
 
@@ -558,7 +768,7 @@ run_research(topic, selected_analysts, run_context)
 7. 补齐任务详情和报告查询接口。
 8. 补充单元测试、集成测试和 API 测试。
 
-## 17. 结论
+## 19. 结论
 
 DeepResearch 第一版应作为独立业务域实现，而不是并入现有聊天接口。实现上采用“业务状态机 + 双 Celery 任务 + 持久化版本记录”的方案，可以在控制复杂度的前提下，支持分析师草案的有限多轮自然语言反馈，并满足长期保存研究记录的产品目标。
 
