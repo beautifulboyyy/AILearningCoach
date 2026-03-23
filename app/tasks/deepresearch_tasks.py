@@ -30,23 +30,33 @@ async def _generate_analysts_task(task_id: int, expected_revision: int, expected
             app_logger.info(f"stale analyst task skipped: task_id={task_id}, revision={expected_revision}")
             return {"status": "stale", "task_id": task_id}
 
-        analysts = await deepresearch_runner.generate_analysts(
-            topic=task.topic,
-            requirements=task.requirements,
-            max_analysts=4,
-            feedback_history=[],
-        )
-        finalized = await deepresearch_service.finalize_analyst_revision(
-            task_id=task_id,
-            expected_revision=expected_revision,
-            analysts=[item.model_dump() if hasattr(item, "model_dump") else item for item in analysts],
-            feedback_text=None,
-            db=db,
-        )
-        if finalized is None:
-            app_logger.info(f"stale analyst task write skipped: task_id={task_id}, revision={expected_revision}")
-            return {"status": "stale", "task_id": task_id}
-        return {"status": "completed", "task_id": task_id, "revision": expected_revision}
+        try:
+            feedback_history = await deepresearch_service.get_feedback_history(task_id=task_id, db=db)
+            analysts = await deepresearch_runner.generate_analysts(
+                topic=task.topic,
+                requirements=task.requirements,
+                max_analysts=task.max_analysts,
+                feedback_history=feedback_history,
+            )
+            finalized = await deepresearch_service.finalize_analyst_revision(
+                task_id=task_id,
+                expected_revision=expected_revision,
+                analysts=[item.model_dump() if hasattr(item, "model_dump") else item for item in analysts],
+                feedback_text=task.pending_feedback_text,
+                db=db,
+            )
+            if finalized is None:
+                app_logger.info(f"stale analyst task write skipped: task_id={task_id}, revision={expected_revision}")
+                return {"status": "stale", "task_id": task_id}
+            return {"status": "completed", "task_id": task_id, "revision": expected_revision}
+        except Exception as exc:
+            await deepresearch_service.mark_task_failed(
+                task_id=task_id,
+                message=str(exc),
+                db=db,
+                expected_status=expected_status,
+            )
+            return {"status": "failed", "task_id": task_id}
 
 
 async def _run_deepresearch_task(task_id: int, selected_revision: int, expected_status: str):
@@ -81,7 +91,13 @@ async def _run_deepresearch_task(task_id: int, selected_revision: int, expected_
                 return {"status": "stale", "task_id": task_id}
             return finalized
         except Exception as exc:
-            await deepresearch_service.mark_task_failed(task_id=task_id, message=str(exc), db=db)
+            await deepresearch_service.mark_task_failed(
+                task_id=task_id,
+                message=str(exc),
+                db=db,
+                expected_status=expected_status,
+                selected_revision=selected_revision,
+            )
             return {"status": "failed", "task_id": task_id}
 
 

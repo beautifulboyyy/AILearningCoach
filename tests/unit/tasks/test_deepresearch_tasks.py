@@ -32,16 +32,29 @@ async def test_generate_analysts_task_skips_when_finalize_returns_none(monkeypat
     calls = {"runner": 0}
 
     async def fake_get_task_for_execution(task_id, db, expected_status=None):
-        return SimpleNamespace(id=task_id, topic="主题", requirements=None)
+        return SimpleNamespace(
+            id=task_id,
+            topic="主题",
+            requirements=None,
+            max_analysts=3,
+            pending_feedback_text="增加工程视角",
+        )
+
+    async def fake_get_feedback_history(task_id, db):
+        return ["增加工程视角"]
 
     async def fake_generate_analysts(**kwargs):
         calls["runner"] += 1
+        calls["feedback_history"] = kwargs["feedback_history"]
+        calls["max_analysts"] = kwargs["max_analysts"]
         return [{"name": "林老师", "role": "教学设计", "affiliation": "高校", "description": "关注结构"}]
 
     async def fake_finalize_analyst_revision(**kwargs):
+        calls["feedback_text"] = kwargs["feedback_text"]
         return None
 
     monkeypatch.setattr(deepresearch_tasks.deepresearch_service, "get_task_for_execution", fake_get_task_for_execution)
+    monkeypatch.setattr(deepresearch_tasks.deepresearch_service, "get_feedback_history", fake_get_feedback_history)
     monkeypatch.setattr(deepresearch_tasks.deepresearch_runner, "generate_analysts", fake_generate_analysts)
     monkeypatch.setattr(deepresearch_tasks.deepresearch_service, "finalize_analyst_revision", fake_finalize_analyst_revision)
 
@@ -53,6 +66,55 @@ async def test_generate_analysts_task_skips_when_finalize_returns_none(monkeypat
 
     assert result["status"] == "stale"
     assert calls["runner"] == 1
+    assert calls["feedback_history"] == ["增加工程视角"]
+    assert calls["max_analysts"] == 3
+    assert calls["feedback_text"] == "增加工程视角"
+
+
+@pytest.mark.asyncio
+async def test_generate_analysts_task_marks_failure_when_runner_raises(monkeypatch):
+    from app.tasks import deepresearch_tasks
+
+    session = object()
+    monkeypatch.setattr(deepresearch_tasks, "async_session_maker", FakeSessionFactory(session))
+
+    async def fake_get_task_for_execution(task_id, db, expected_status=None):
+        return SimpleNamespace(
+            id=task_id,
+            topic="主题",
+            requirements=None,
+            max_analysts=4,
+            pending_feedback_text=None,
+        )
+
+    async def fake_get_feedback_history(task_id, db):
+        return []
+
+    async def fake_generate_analysts(**kwargs):
+        raise RuntimeError("analyst generation error")
+
+    captured = {}
+
+    async def fake_mark_task_failed(task_id, message, db, expected_status=None, selected_revision=None):
+        captured["message"] = message
+        captured["expected_status"] = expected_status
+        captured["selected_revision"] = selected_revision
+
+    monkeypatch.setattr(deepresearch_tasks.deepresearch_service, "get_task_for_execution", fake_get_task_for_execution)
+    monkeypatch.setattr(deepresearch_tasks.deepresearch_service, "get_feedback_history", fake_get_feedback_history)
+    monkeypatch.setattr(deepresearch_tasks.deepresearch_runner, "generate_analysts", fake_generate_analysts)
+    monkeypatch.setattr(deepresearch_tasks.deepresearch_service, "mark_task_failed", fake_mark_task_failed)
+
+    result = await deepresearch_tasks._generate_analysts_task(
+        task_id=1,
+        expected_revision=1,
+        expected_status="drafting_analysts",
+    )
+
+    assert result["status"] == "failed"
+    assert "analyst generation error" in captured["message"]
+    assert captured["expected_status"] == "drafting_analysts"
+    assert captured["selected_revision"] is None
 
 
 @pytest.mark.asyncio
@@ -116,8 +178,10 @@ async def test_run_deepresearch_task_marks_failure_when_runner_raises(monkeypatc
 
     captured = {}
 
-    async def fake_mark_task_failed(task_id, message, db):
+    async def fake_mark_task_failed(task_id, message, db, expected_status=None, selected_revision=None):
         captured["message"] = message
+        captured["expected_status"] = expected_status
+        captured["selected_revision"] = selected_revision
 
     monkeypatch.setattr(deepresearch_tasks.deepresearch_service, "get_task_for_execution", fake_get_task_for_execution)
     monkeypatch.setattr(deepresearch_tasks.deepresearch_service, "get_selected_analysts", fake_get_selected_analysts)
@@ -132,3 +196,5 @@ async def test_run_deepresearch_task_marks_failure_when_runner_raises(monkeypatc
 
     assert result["status"] == "failed"
     assert "runner error" in captured["message"]
+    assert captured["expected_status"] == "running_research"
+    assert captured["selected_revision"] == 2

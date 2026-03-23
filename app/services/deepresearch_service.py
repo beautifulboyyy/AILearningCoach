@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.deepresearch import (
@@ -100,6 +100,7 @@ class DeepResearchService:
             user_id=user_id,
             topic=task_data["topic"],
             requirements=task_data.get("requirements"),
+            max_analysts=task_data.get("max_analysts", 4),
             status=DeepResearchTaskStatus.DRAFTING_ANALYSTS,
             phase=DeepResearchPhase.ANALYST_GENERATION,
             progress_percent=5,
@@ -107,6 +108,7 @@ class DeepResearchService:
             current_revision=0,
             feedback_round_used=0,
             max_feedback_rounds=task_data.get("max_feedback_rounds", 3),
+            pending_feedback_text=None,
         )
         db.add(task)
         await db.commit()
@@ -160,10 +162,11 @@ class DeepResearchService:
         if task.current_revision + 1 != expected_revision:
             raise DeepResearchConflictError("分析师版本号不匹配")
 
+        persisted_feedback = feedback_text if feedback_text is not None else task.pending_feedback_text
         revision = DeepResearchAnalystRevision(
             task_id=task_id,
             revision_number=expected_revision,
-            feedback_text=feedback_text,
+            feedback_text=persisted_feedback,
             analysts_json=analysts,
             is_selected=False,
         )
@@ -171,6 +174,7 @@ class DeepResearchService:
 
         task.current_revision = expected_revision
         task.feedback_round_used = self.calculate_feedback_round_used(expected_revision)
+        task.pending_feedback_text = None
         task.status = DeepResearchTaskStatus.WAITING_FEEDBACK
         task.phase = DeepResearchPhase.ANALYST_FEEDBACK
         task.progress_percent = 25
@@ -199,6 +203,7 @@ class DeepResearchService:
             max_feedback_rounds=task.max_feedback_rounds,
         )
 
+        task.pending_feedback_text = feedback
         task.status = DeepResearchTaskStatus.DRAFTING_ANALYSTS
         task.phase = DeepResearchPhase.ANALYST_GENERATION
         task.progress_percent = 10
@@ -342,6 +347,26 @@ class DeepResearchService:
             raise DeepResearchConflictError("选定的分析师版本不存在")
         return revision.analysts_json or []
 
+    async def get_feedback_history(
+        self,
+        task_id: int,
+        db: AsyncSession,
+    ) -> list[str]:
+        """按时间顺序读取历史反馈，并附加当前待消费反馈。"""
+        result = await db.execute(
+            select(DeepResearchAnalystRevision)
+            .where(DeepResearchAnalystRevision.task_id == task_id)
+            .order_by(DeepResearchAnalystRevision.revision_number)
+        )
+        revisions = result.scalars().all()
+        feedback_history = [item.feedback_text for item in revisions if item.feedback_text]
+
+        task_result = await db.execute(select(DeepResearchTask).where(DeepResearchTask.id == task_id))
+        task = task_result.scalar_one_or_none()
+        if task is not None and task.pending_feedback_text:
+            feedback_history.append(task.pending_feedback_text)
+        return feedback_history
+
     async def finalize_research_run(
         self,
         task_id: int,
@@ -392,21 +417,39 @@ class DeepResearchService:
         task_id: int,
         message: str,
         db: AsyncSession,
+        expected_status: str | None = None,
+        selected_revision: int | None = None,
     ) -> None:
         """标记任务失败。"""
-        task = await self.get_task_for_execution(task_id=task_id, db=db)
+        task = await self.get_task_for_execution(
+            task_id=task_id,
+            db=db,
+            expected_status=expected_status,
+        )
         if task is None:
+            return
+        if selected_revision is not None and task.selected_revision != selected_revision:
             return
         task.status = DeepResearchTaskStatus.FAILED
         task.error_message = message
         task.progress_message = "任务执行失败"
 
-        result = await db.execute(
-            select(DeepResearchRun)
-            .where(DeepResearchRun.task_id == task_id)
-            .order_by(DeepResearchRun.created_at.desc())
-        )
-        run = result.scalars().first()
+        run = None
+        if selected_revision is not None:
+            result = await db.execute(
+                select(DeepResearchRun).where(
+                    DeepResearchRun.task_id == task_id,
+                    DeepResearchRun.revision_number == selected_revision,
+                )
+            )
+            run = result.scalar_one_or_none()
+        else:
+            result = await db.execute(
+                select(DeepResearchRun)
+                .where(DeepResearchRun.task_id == task_id)
+                .order_by(DeepResearchRun.created_at.desc())
+            )
+            run = result.scalars().first()
         if run is not None:
             run.status = "failed"
             run.error_message = message

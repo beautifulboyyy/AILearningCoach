@@ -182,6 +182,61 @@ async def test_finalize_analyst_revision_creates_revision_one(async_session):
 
 
 @pytest.mark.asyncio
+async def test_submit_feedback_persists_pending_feedback_and_history(async_session):
+    service = DeepResearchService()
+    user = User(
+        username="feedback_user",
+        email="feedback@example.com",
+        password_hash="hashed",
+    )
+    async_session.add(user)
+    await async_session.commit()
+    await async_session.refresh(user)
+
+    task = await service.create_task(
+        user_id=user.id,
+        task_data=DeepResearchTaskCreate(topic="反馈闭环", max_analysts=3).model_dump(),
+        db=async_session,
+    )
+    await service.finalize_analyst_revision(
+        task_id=task.id,
+        expected_revision=1,
+        analysts=[{"name": "林老师", "role": "教学设计分析师", "affiliation": "高校", "description": "关注结构"}],
+        feedback_text=None,
+        db=async_session,
+    )
+
+    updated_task = await service.submit_feedback(
+        task_id=task.id,
+        user_id=user.id,
+        feedback="增加偏工程落地的分析视角",
+        db=async_session,
+    )
+    assert updated_task.pending_feedback_text == "增加偏工程落地的分析视角"
+
+    feedback_history = await service.get_feedback_history(task_id=task.id, db=async_session)
+    assert feedback_history == ["增加偏工程落地的分析视角"]
+
+    finalized = await service.finalize_analyst_revision(
+        task_id=task.id,
+        expected_revision=2,
+        analysts=[{"name": "周工", "role": "架构分析师", "affiliation": "企业", "description": "关注工程化"}],
+        feedback_text=updated_task.pending_feedback_text,
+        db=async_session,
+    )
+    assert finalized.current_revision == 2
+    assert finalized.pending_feedback_text is None
+
+    result = await async_session.execute(
+        select(DeepResearchAnalystRevision)
+        .where(DeepResearchAnalystRevision.task_id == task.id)
+        .order_by(DeepResearchAnalystRevision.revision_number)
+    )
+    revisions = result.scalars().all()
+    assert revisions[1].feedback_text == "增加偏工程落地的分析视角"
+
+
+@pytest.mark.asyncio
 async def test_start_research_locks_selected_revision_and_selection_flags(async_session):
     service = DeepResearchService()
     user = User(
@@ -236,3 +291,47 @@ async def test_start_research_locks_selected_revision_and_selection_flags(async_
     )
     revisions = result.scalars().all()
     assert [item.is_selected for item in revisions] == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_mark_task_failed_skips_when_selected_revision_is_stale(async_session):
+    service = DeepResearchService()
+    user = User(
+        username="stale_fail_user",
+        email="stale-fail@example.com",
+        password_hash="hashed",
+    )
+    async_session.add(user)
+    await async_session.commit()
+    await async_session.refresh(user)
+
+    task = await service.create_task(
+        user_id=user.id,
+        task_data=DeepResearchTaskCreate(topic="失败保护").model_dump(),
+        db=async_session,
+    )
+    await service.finalize_analyst_revision(
+        task_id=task.id,
+        expected_revision=1,
+        analysts=[{"name": "林老师", "role": "教学设计分析师", "affiliation": "高校", "description": "关注结构"}],
+        feedback_text=None,
+        db=async_session,
+    )
+    await service.start_research(
+        task_id=task.id,
+        user_id=user.id,
+        selected_revision=1,
+        db=async_session,
+    )
+
+    await service.mark_task_failed(
+        task_id=task.id,
+        message="旧 worker 失败",
+        db=async_session,
+        expected_status="running_research",
+        selected_revision=2,
+    )
+
+    refreshed_task = await service.get_task(task_id=task.id, user_id=user.id, db=async_session)
+    assert refreshed_task.status.value == "running_research"
+    assert refreshed_task.error_message is None

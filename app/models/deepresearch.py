@@ -38,6 +38,7 @@ class DeepResearchTask(Base, TimestampMixin):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     topic = Column(String(500), nullable=False)
     requirements = Column(Text, nullable=True)
+    max_analysts = Column(Integer, nullable=False, default=4)
     status = Column(
         SQLEnum(DeepResearchTaskStatus),
         default=DeepResearchTaskStatus.PENDING,
@@ -50,6 +51,7 @@ class DeepResearchTask(Base, TimestampMixin):
     current_revision = Column(Integer, nullable=False, default=0)
     feedback_round_used = Column(Integer, nullable=False, default=0)
     max_feedback_rounds = Column(Integer, nullable=False, default=3)
+    pending_feedback_text = Column(Text, nullable=True)
     selected_revision = Column(Integer, nullable=True)
     final_report_markdown = Column(Text, nullable=True)
     final_report_summary = Column(Text, nullable=True)
