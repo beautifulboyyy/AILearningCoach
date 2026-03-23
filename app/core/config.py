@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str
     DEEPSEEK_API_BASE: str = "https://api.deepseek.com"
     DEEPSEEK_MODEL: str = "deepseek-chat"
+
+    # DeepResearch 搜索配置
+    TAVILY_API_KEY: Optional[str] = None
+    BOCHA_API_KEY: Optional[str] = None
     
     # 通义千问配置（Embedding）
     DASHSCOPE_API_KEY: str

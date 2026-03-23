@@ -12,6 +12,7 @@ email-validator>=2.1.0
 # Database
 sqlalchemy>=2.0.25
 asyncpg>=0.29.0
+aiosqlite>=0.20.0
 alembic>=1.13.0
 psycopg2-binary>=2.9.9
 
@@ -25,6 +26,7 @@ python-jose[cryptography]>=3.3.0
 langchain>=0.1.0
 langchain-community>=0.0.20
 langgraph>=0.0.20
+langchain-tavily>=0.1.0
 httpx>=0.26.0
 docx2txt>=0.8
 mineru-open-sdk>=0.1.3

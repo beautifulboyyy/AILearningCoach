@@ -16,6 +16,13 @@ from app.models.knowledge import (
     KnowledgeChunkAsset,
     KnowledgeDocument,
 )
+from app.models.deepresearch import (
+    DeepResearchAnalystRevision,
+    DeepResearchPhase,
+    DeepResearchRun,
+    DeepResearchTask,
+    DeepResearchTaskStatus,
+)
 
 __all__ = [
     "Base",
@@ -41,4 +48,9 @@ __all__ = [
     "KnowledgeAsset",
     "KnowledgeChunkAsset",
     "IngestJob",
+    "DeepResearchTask",
+    "DeepResearchTaskStatus",
+    "DeepResearchPhase",
+    "DeepResearchAnalystRevision",
+    "DeepResearchRun",
 ]

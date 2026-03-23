@@ -3,6 +3,8 @@ Celery应用配置
 """
 from celery import Celery
 from celery.schedules import crontab
+from kombu import Queue
+
 from app.core.config import settings
 
 # 创建Celery应用
@@ -10,7 +12,7 @@ celery_app = Celery(
     "ai_learning_coach",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.periodic", "app.tasks.async_tasks"]
+    include=["app.tasks.periodic", "app.tasks.async_tasks", "app.tasks.deepresearch_tasks"]
 )
 
 # Celery配置
@@ -25,6 +27,15 @@ celery_app.conf.update(
     task_soft_time_limit=25 * 60,  # 25分钟软超时
     worker_prefetch_multiplier=4,
     worker_max_tasks_per_child=1000,
+    task_default_queue="celery",
+    task_queues=(
+        Queue("celery"),
+        Queue("deepresearch"),
+    ),
+    task_routes={
+        "app.tasks.deepresearch_tasks.generate_analysts_task": {"queue": "deepresearch"},
+        "app.tasks.deepresearch_tasks.run_deepresearch_task": {"queue": "deepresearch"},
+    },
 )
 
 # 定时任务配置

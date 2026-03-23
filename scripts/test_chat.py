@@ -5,6 +5,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 # 添加项目根目录到路径
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -12,6 +14,7 @@ from app.ai.rag.generator import rag_generator
 from app.utils.logger import app_logger
 
 
+@pytest.mark.asyncio
 async def test_chat():
     """测试对话功能"""
     try:
