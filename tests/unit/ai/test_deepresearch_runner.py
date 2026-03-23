@@ -19,6 +19,20 @@ class FakeLLM:
         return "# 最终报告\n\n这是研究结果。"
 
 
+class FencedJsonLLM:
+    async def chat(self, user_message: str, system_message: str = None, **kwargs):
+        return """```json
+[
+  {
+    "affiliation": "高校",
+    "name": "林老师",
+    "role": "教学设计分析师",
+    "description": "关注课程结构和学习动机"
+  }
+]
+```"""
+
+
 class FakeSearchService:
     def __init__(self, tavily_result=None, bocha_result=None, tavily_error=None, bocha_error=None):
         self.tavily_result = tavily_result or []
@@ -50,6 +64,21 @@ async def test_generate_analysts_returns_structured_items():
     assert len(analysts) == 1
     assert analysts[0].name == "林老师"
     assert analysts[0].role == "教学设计分析师"
+
+
+@pytest.mark.asyncio
+async def test_generate_analysts_accepts_fenced_json_response():
+    runner = DeepResearchRunner(llm_client=FencedJsonLLM(), search_service=FakeSearchService())
+
+    analysts = await runner.generate_analysts(
+        topic="LangGraph",
+        requirements="偏教学",
+        max_analysts=4,
+        feedback_history=[],
+    )
+
+    assert len(analysts) == 1
+    assert analysts[0].name == "林老师"
 
 
 @pytest.mark.asyncio

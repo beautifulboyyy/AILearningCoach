@@ -335,3 +335,41 @@ async def test_mark_task_failed_skips_when_selected_revision_is_stale(async_sess
     refreshed_task = await service.get_task(task_id=task.id, user_id=user.id, db=async_session)
     assert refreshed_task.status.value == "running_research"
     assert refreshed_task.error_message is None
+
+
+@pytest.mark.asyncio
+async def test_delete_task_removes_task_and_related_records(async_session):
+    service = DeepResearchService()
+    user = User(
+        username="delete_user",
+        email="delete@example.com",
+        password_hash="hashed",
+    )
+    async_session.add(user)
+    await async_session.commit()
+    await async_session.refresh(user)
+
+    task = await service.create_task(
+        user_id=user.id,
+        task_data=DeepResearchTaskCreate(topic="删除测试").model_dump(),
+        db=async_session,
+    )
+    await service.finalize_analyst_revision(
+        task_id=task.id,
+        expected_revision=1,
+        analysts=[{"name": "林老师", "role": "教学设计分析师", "affiliation": "高校", "description": "关注结构"}],
+        feedback_text=None,
+        db=async_session,
+    )
+
+    await service.delete_task(task_id=task.id, user_id=user.id, db=async_session)
+
+    deleted_task = await service.get_task(task_id=task.id, user_id=user.id, db=async_session)
+    assert deleted_task is None
+
+    revisions = (
+        await async_session.execute(
+            select(DeepResearchAnalystRevision).where(DeepResearchAnalystRevision.task_id == task.id)
+        )
+    ).scalars().all()
+    assert revisions == []

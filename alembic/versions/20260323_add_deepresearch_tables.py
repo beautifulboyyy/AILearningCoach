@@ -7,6 +7,7 @@ Create Date: 2026-03-23 18:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -16,7 +17,27 @@ branch_labels = None
 depends_on = None
 
 
-deep_research_task_status = sa.Enum(
+deep_research_task_status = postgresql.ENUM(
+    "PENDING",
+    "DRAFTING_ANALYSTS",
+    "WAITING_FEEDBACK",
+    "RUNNING_RESEARCH",
+    "COMPLETED",
+    "FAILED",
+    name="deepresearchtaskstatus",
+    create_type=False,
+)
+
+deep_research_phase = postgresql.ENUM(
+    "ANALYST_GENERATION",
+    "ANALYST_FEEDBACK",
+    "RESEARCH_EXECUTION",
+    "REPORT_FINALIZATION",
+    name="deepresearchphase",
+    create_type=False,
+)
+
+deep_research_task_status_create = postgresql.ENUM(
     "PENDING",
     "DRAFTING_ANALYSTS",
     "WAITING_FEEDBACK",
@@ -26,7 +47,7 @@ deep_research_task_status = sa.Enum(
     name="deepresearchtaskstatus",
 )
 
-deep_research_phase = sa.Enum(
+deep_research_phase_create = postgresql.ENUM(
     "ANALYST_GENERATION",
     "ANALYST_FEEDBACK",
     "RESEARCH_EXECUTION",
@@ -36,8 +57,8 @@ deep_research_phase = sa.Enum(
 
 
 def upgrade() -> None:
-    deep_research_task_status.create(op.get_bind(), checkfirst=True)
-    deep_research_phase.create(op.get_bind(), checkfirst=True)
+    deep_research_task_status_create.create(op.get_bind(), checkfirst=True)
+    deep_research_phase_create.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "deep_research_tasks",
@@ -161,5 +182,5 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_deep_research_tasks_id"), table_name="deep_research_tasks")
     op.drop_table("deep_research_tasks")
 
-    deep_research_phase.drop(op.get_bind(), checkfirst=True)
-    deep_research_task_status.drop(op.get_bind(), checkfirst=True)
+    deep_research_phase_create.drop(op.get_bind(), checkfirst=True)
+    deep_research_task_status_create.drop(op.get_bind(), checkfirst=True)

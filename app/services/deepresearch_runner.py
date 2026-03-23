@@ -2,6 +2,7 @@
 DeepResearch Runner
 """
 import json
+import re
 from typing import Any, List
 
 from app.ai.deepresearch.models import DeepResearchAnalystProfile
@@ -19,6 +20,33 @@ class DeepResearchRunner:
 
     async def search(self, query: str) -> List[dict]:
         return await self.search_service.search(query)
+
+    @staticmethod
+    def _extract_json_payload(content: str) -> Any:
+        """从模型返回中提取 JSON，兼容 fenced code block 和前后说明文字。"""
+        text = content.strip()
+
+        fenced_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+        if fenced_match:
+            text = fenced_match.group(1).strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            start_positions = [idx for idx in (text.find("["), text.find("{")) if idx != -1]
+            if not start_positions:
+                raise
+
+            start = min(start_positions)
+            for end in range(len(text), start, -1):
+                candidate = text[start:end].strip()
+                if not candidate:
+                    continue
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    continue
+            raise
 
     async def generate_analysts(
         self,
@@ -39,7 +67,7 @@ class DeepResearchRunner:
             user_message=user_message,
             system_message=ANALYST_SYSTEM_PROMPT,
         )
-        data = json.loads(content)
+        data = self._extract_json_payload(content)
         return [DeepResearchAnalystProfile.model_validate(item) for item in data]
 
     async def run_research(

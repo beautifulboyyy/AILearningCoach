@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.deepresearch import (
@@ -469,6 +469,20 @@ class DeepResearchService:
         if not task.final_report_markdown:
             raise DeepResearchConflictError("研究尚未完成，暂无报告")
         return task.final_report_markdown
+
+    async def delete_task(
+        self,
+        task_id: int,
+        user_id: int,
+        db: AsyncSession,
+    ) -> None:
+        """删除任务及其关联版本、运行记录。"""
+        task = await self.get_task(task_id=task_id, user_id=user_id, db=db)
+        if task is None:
+            raise DeepResearchNotFoundError("DeepResearch 任务不存在")
+
+        await db.delete(task)
+        await db.commit()
 
 
 deepresearch_service = DeepResearchService()

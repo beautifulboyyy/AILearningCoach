@@ -155,3 +155,21 @@ async def test_report_endpoint_rejects_unfinished_task(api_client, api_user, asy
     response = await api_client.get(f"/api/v1/deepresearch/tasks/{task.id}/report")
 
     assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_delete_task_endpoint_removes_task(api_client, api_user, async_session):
+    from app.services.deepresearch_service import deepresearch_service
+
+    task = await deepresearch_service.create_task(
+        user_id=api_user.id,
+        task_data={"topic": "删除接口测试", "requirements": None},
+        db=async_session,
+    )
+
+    response = await api_client.delete(f"/api/v1/deepresearch/tasks/{task.id}")
+
+    assert response.status_code == 204
+
+    task_check = await deepresearch_service.get_task(task_id=task.id, user_id=api_user.id, db=async_session)
+    assert task_check is None
