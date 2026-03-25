@@ -679,33 +679,21 @@ def create_analysts(state: Dict[str, Any]) -> Dict[str, Any]:
         max_analysts=max_analysts
     )
 
-    # 使用结构化输出
+    # 使用结构化输出 - 直接使用JsonOutputParser
     from langchain_core.output_parsers import JsonOutputParser
-    from pydantic import BaseModel, Field
-    from typing import List as TList
 
-    class AnalystOutput(BaseModel):
-        name: str
-        affiliation: str
-        role: str
-        description: str
+    parser = JsonOutputParser()
 
-    class AnalystsOutput(BaseModel):
-        analysts: TList[AnalystOutput]
-
-    parser = JsonOutputParser(pydantic_object=AnalystsOutput)
+    # 提示LLM输出JSON格式
     chain = llm | parser
 
     response = chain.invoke([
-        SystemMessage(content=system_msg),
-        HumanMessage(content="生成分析师集合，以JSON格式输出。")
+        SystemMessage(content=system_msg + "\n\n请以JSON格式输出分析师列表。"),
+        HumanMessage(content="生成分析师集合。")
     ])
 
-    analysts = [
-        {"name": a["name"], "affiliation": a["affiliation"],
-         "role": a["role"], "description": a["description"]}
-        for a in response["analysts"]
-    ]
+    # response 已经是dict，直接使用
+    analysts = response.get("analysts", [])
 
     return {"analysts": analysts}
 
@@ -1328,10 +1316,13 @@ async def stream_research_events(
 
 - [ ] **Step 2: 注册路由到api.py**
 
+在 `app/api/v1/api.py` 文件顶部添加import (与其他endpoint导入放在一起):
 ```python
-# 在 app/api/v1/api.py 中添加
 from app.api.v1.endpoints import deep_research
+```
 
+在 `api_router` 定义后添加 (与其他include_router放在一起):
+```python
 api_router.include_router(deep_research.router, prefix="/deep-research", tags=["深度研究"])
 ```
 
@@ -1347,41 +1338,13 @@ git commit -m "feat: 添加 Deep Research API端点"
 ### Task 14: 数据库迁移
 
 **Files:**
-- Create: `alembic/versions/xxxx_add_research_tasks.py`
+- Create: `alembic/versions/<自动生成的文件名>.py` (使用命令生成)
 
-- [ ] **Step 1: 创建迁移文件**
+- [ ] **Step 1: 自动生成迁移文件**
 
-```python
-"""添加研究任务表"""
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID, JSON
+Run: `alembic revision --autogenerate -m "add research_tasks"`
 
-revision = 'add_research_tasks'
-down_revision = 'previous_revision'
-branch_labels = None
-depends_on = None
-
-
-def upgrade():
-    op.create_table(
-        'research_tasks',
-        sa.Column('id', UUID(as_uuid=True), primary_key=True),
-        sa.Column('thread_id', sa.String(255), unique=True, nullable=False, index=True),
-        sa.Column('topic', sa.String(500), nullable=False),
-        sa.Column('status', sa.Enum('pending', 'running', 'completed', 'failed', 'cancelled', name='research_status'), nullable=False),
-        sa.Column('max_analysts', sa.Integer(), default=5),
-        sa.Column('max_turns', sa.Integer(), default=3),
-        sa.Column('analysts_config', JSON, nullable=True),
-        sa.Column('final_report', sa.Text(), nullable=True),
-        sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()')),
-        sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), onupdate=sa.text('now()')),
-    )
-
-
-def downgrade():
-    op.drop_table('research_tasks')
-```
+这将自动生成迁移文件，包含research_tasks表的定义。迁移文件将自动设置正确的revision和down_revision。
 
 - [ ] **Step 2: 运行迁移**
 
@@ -1390,7 +1353,7 @@ Run: `alembic upgrade head`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add alembic/versions/xxxx_add_research_tasks.py
+git add alembic/versions/<generated_file>.py
 git commit -m "feat: 添加 research_tasks 表迁移"
 ```
 
