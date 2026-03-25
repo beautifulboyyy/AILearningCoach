@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     MINERU_API_MODE: str = "precision"
     MINERU_TOKEN: Optional[str] = None
     MINERU_TIMEOUT: int = 1200
+
+    # Deep Research API Keys
+    TAVILY_API_KEY: Optional[str] = None
+    BOCHA_API_KEY: Optional[str] = None
     
     # JWT配置
     SECRET_KEY: str

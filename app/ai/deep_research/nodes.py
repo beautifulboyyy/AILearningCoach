@@ -3,13 +3,13 @@ from typing import Dict, Any, List
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, get_buffer_string
 
-from app.ai.deep_research.llm import llm
+from app.ai.deep_research.llm import get_llm
 from app.ai.deep_research.prompts import (
     analyst_instructions, question_instructions, answer_instructions,
     section_writer_instructions, report_writer_instructions,
     intro_conclusion_instructions, search_instructions
 )
-from app.ai.deep_research.tools.tavily import tavily_tool
+from app.ai.deep_research.tools.tavily import get_tavily_tool
 from app.ai.deep_research.tools.bocha import BochaSearchTool
 
 
@@ -34,7 +34,7 @@ def create_analysts(state: Dict[str, Any]) -> Dict[str, Any]:
     parser = JsonOutputParser()
 
     # 提示LLM输出JSON格式
-    chain = llm | parser
+    chain = get_llm() | parser
 
     response = chain.invoke([
         SystemMessage(content=system_msg + "\n\n请以JSON格式输出分析师列表。"),
@@ -56,7 +56,7 @@ def generate_question(state: Dict[str, Any]) -> Dict[str, Any]:
     persona = f"Name: {analyst['name']}\nRole: {analyst['role']}\nAffiliation: {analyst['affiliation']}\nDescription: {analyst['description']}"
 
     system_msg = question_instructions.format(goals=persona)
-    question = llm.invoke([SystemMessage(content=system_msg)] + messages)
+    question = get_llm().invoke([SystemMessage(content=system_msg)] + messages)
 
     return {"messages": [question]}
 
@@ -71,11 +71,11 @@ def search_web(state: Dict[str, Any]) -> Dict[str, Any]:
     parser = JsonOutputParser()
 
     # 从对话中提取搜索查询
-    query_gen_chain = llm | parser
+    query_gen_chain = get_llm() | parser
     search_query = query_gen_chain.invoke([SystemMessage(content=search_query_prompt)] + messages)
 
     # 执行Tavily搜索
-    docs = tavily_tool.invoke(search_query.get("search_query", ""))
+    docs = get_tavily_tool().invoke(search_query.get("search_query", ""))
 
     formatted = f'\n\n---\n\n{docs}\n\n---'
 
@@ -90,7 +90,7 @@ def search_bocha(state: Dict[str, Any]) -> Dict[str, Any]:
     from langchain_core.output_parsers import JsonOutputParser
     parser = JsonOutputParser()
 
-    query_gen_chain = llm | parser
+    query_gen_chain = get_llm() | parser
     search_query = query_gen_chain.invoke([SystemMessage(content=search_query_prompt)] + messages)
 
     # 执行Bocha搜索
@@ -115,7 +115,7 @@ def generate_answer(state: Dict[str, Any]) -> Dict[str, Any]:
         context="\n".join(context)
     )
 
-    answer = llm.invoke([SystemMessage(content=system_msg)] + messages)
+    answer = get_llm().invoke([SystemMessage(content=system_msg)] + messages)
     answer.name = "expert"
 
     return {"messages": [answer]}
@@ -156,7 +156,7 @@ def write_section(state: Dict[str, Any]) -> Dict[str, Any]:
 
     system_msg = section_writer_instructions.format(focus=analyst["description"])
 
-    section = llm.invoke([
+    section = get_llm().invoke([
         SystemMessage(content=system_msg),
         HumanMessage(content=f"使用这些来源撰写你的小节: {context}")
     ])
@@ -172,7 +172,7 @@ def write_report(state: Dict[str, Any]) -> Dict[str, Any]:
     formatted = "\n\n".join(sections)
     system_msg = report_writer_instructions.format(topic=topic, context=formatted)
 
-    report = llm.invoke([
+    report = get_llm().invoke([
         SystemMessage(content=system_msg),
         HumanMessage(content="基于这些备忘录撰写报告。")
     ])
@@ -191,7 +191,7 @@ def write_introduction(state: Dict[str, Any]) -> Dict[str, Any]:
         formatted_str_sections=formatted
     )
 
-    intro = llm.invoke([
+    intro = get_llm().invoke([
         SystemMessage(content=instructions),
         HumanMessage(content="撰写报告引言")
     ])
@@ -210,7 +210,7 @@ def write_conclusion(state: Dict[str, Any]) -> Dict[str, Any]:
         formatted_str_sections=formatted
     )
 
-    conclusion = llm.invoke([
+    conclusion = get_llm().invoke([
         SystemMessage(content=instructions),
         HumanMessage(content="撰写报告结论")
     ])
