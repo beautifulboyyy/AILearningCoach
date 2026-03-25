@@ -16,6 +16,7 @@ from app.models.knowledge import (
     KnowledgeChunkAsset,
     KnowledgeDocument,
 )
+from app.models.research_task import ResearchTask, ResearchStatus
 
 __all__ = [
     "Base",
@@ -41,4 +42,6 @@ __all__ = [
     "KnowledgeAsset",
     "KnowledgeChunkAsset",
     "IngestJob",
+    "ResearchTask",
+    "ResearchStatus",
 ]
