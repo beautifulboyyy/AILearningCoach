@@ -38,6 +38,70 @@ START → create_analysts → human_feedback → [Send() 并行] → conduct_int
 - `max_analysts = 5` (最大分析师数量)
 - `max_turns = 3` (每个访谈最大轮次)
 
+### 状态定义
+
+**GenerateAnalystsState** (分析师生成阶段)
+```python
+{
+    "topic": str,                    # 研究主题
+    "max_analysts": int,             # 最大分析师数量
+    "human_analyst_feedback": str,   # 人类反馈(可选)
+    "analysts": List[Analyst]        # 生成的分析师列表
+}
+```
+
+**InterviewState** (访谈子图)
+```python
+{
+    "messages": List[BaseMessage],   # 对话历史
+    "max_num_turns": int,            # 最大对话轮次
+    "context": Annotated[list, operator.add],  # 检索到的文档
+    "analyst": Analyst,              # 当前分析师
+    "interview": str,                 # 完整访谈记录
+    "sections": list                  # 访谈摘要小节
+}
+```
+
+**ResearchGraphState** (主图状态)
+```python
+{
+    "topic": str,
+    "max_analysts": int,
+    "human_analyst_feedback": str,
+    "analysts": List[Analyst],
+    "sections": Annotated[list, operator.add],  # 所有小节(累加)
+    "introduction": str,
+    "content": str,
+    "conclusion": str,
+    "final_report": str
+}
+```
+
+### 路由逻辑
+
+**访谈子图路由 (`route_messages`)**
+```
+条件:
+  - 如果专家回答次数 >= max_num_turns → save_interview
+  - 如果上一条消息包含"非常感谢您的帮助!" → save_interview
+  - 否则 → ask_question (继续提问)
+```
+
+**主图条件边**
+```
+human_feedback:
+  - 如果 human_analyst_feedback 有值 → create_analysts (重新生成)
+  - 如果为 None → [Send() 并行启动 conduct_interview]
+```
+
+### 错误处理
+
+- **API调用失败**: 重试3次，间隔2秒 Exponential backoff
+- **搜索无结果**: 继续流程，使用空context
+- **LLM生成失败**: 返回错误状态，更新数据库 status=failed
+- **任务取消**: 检查 cancelled 状态，提前终止子图执行
+- **超时处理**: 全局超时30分钟，超时强制结束
+
 ## 目录结构
 
 ```
@@ -130,7 +194,7 @@ data: {"final_report": "完整报告..."}
 
 ### 1. 分析师生成
 - 根据主题和方向生成N个分析师
-- 支持人类反馈调整分析师配置
+- **单点人类反馈**: 在分析师生成后、人工作审核调整，可选择重新生成或继续
 - 使用Pydantic模型结构化输出
 
 ### 2. 并行访谈子图
