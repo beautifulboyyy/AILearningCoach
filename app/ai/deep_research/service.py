@@ -126,6 +126,21 @@ class DeepResearchService:
 
     def _classify_event(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """分类事件类型"""
-        if "create_analysts" in event:
+        event_name = event.get("name", "")
+        event_type = event.get("event", "")
+
+        if event_type == "on_chain_end" and "final_report" in event.get("data", {}).get("output", {}):
+            return None  # 忽略最终输出事件
+
+        if "create_analysts" in event_name:
             return {"type": "status", "data": {"message": "正在生成分析师..."}}
+        if event_name == "conduct_interview":
+            return {"type": "status", "data": {"message": "正在访谈分析师..."}}
+        if event_name == "write_report":
+            return {"type": "status", "data": {"message": "正在撰写报告..."}}
+
+        # 通用状态事件
+        if event_type == "on_chain_start":
+            return {"type": "status", "data": {"message": f"执行节点: {event_name}"}}
+
         return None

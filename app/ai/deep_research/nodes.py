@@ -1,7 +1,8 @@
 """Deep Research 节点函数"""
-from typing import Dict, Any, List
-
+from typing import Dict, Any, List, Annotated
+from pydantic import BaseModel, Field
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, get_buffer_string
+from langchain_core.output_parsers import JsonOutputParser
 
 from app.ai.deep_research.llm import get_llm
 from app.ai.deep_research.prompts import (
@@ -16,6 +17,31 @@ from app.ai.deep_research.tools.bocha import BochaSearchTool
 bocha_tool = BochaSearchTool()
 
 
+# ===== Pydantic 模型 =====
+class Analyst(BaseModel):
+    """分析师数据模型"""
+    affiliation: str = Field(description="分析师的主要隶属机构或组织")
+    name: str = Field(description="分析师姓名")
+    role: str = Field(description="分析师在研究主题中的具体角色定位")
+    description: str = Field(description="分析师的关注焦点、关切点和动机的详细描述")
+
+    @property
+    def persona(self) -> str:
+        """生成分析师人设描述"""
+        return f"Name: {self.name}\nRole: {self.role}\nAffiliation: {self.affiliation}\nDescription: {self.description}\n"
+
+
+class Perspectives(BaseModel):
+    """分析师集合数据模型"""
+    analysts: List[Analyst] = Field(description="包含所有分析师角色和隶属机构的综合列表")
+
+
+class SearchQuery(BaseModel):
+    """搜索查询数据模型"""
+    search_query: str = Field(None, description="用于检索的搜索查询语句")
+
+
+# ===== 节点函数 =====
 def create_analysts(state: Dict[str, Any]) -> Dict[str, Any]:
     """创建分析师团队"""
     topic = state["topic"]
@@ -28,23 +54,19 @@ def create_analysts(state: Dict[str, Any]) -> Dict[str, Any]:
         max_analysts=max_analysts
     )
 
-    # 使用结构化输出 - 直接使用JsonOutputParser
-    from langchain_core.output_parsers import JsonOutputParser
+    structured_llm = get_llm().with_structured_output(Perspectives)
 
-    parser = JsonOutputParser()
+    try:
+        result = structured_llm.invoke([
+            SystemMessage(content=system_msg),
+            HumanMessage(content="生成分析师集合。")
+        ])
+        analysts = result.analysts if result else []
+    except Exception:
+        analysts = []
 
-    # 提示LLM输出JSON格式
-    chain = get_llm() | parser
-
-    response = chain.invoke([
-        SystemMessage(content=system_msg + "\n\n请以JSON格式输出分析师列表。"),
-        HumanMessage(content="生成分析师集合。")
-    ])
-
-    # response 已经是dict，直接使用
-    analysts = response.get("analysts", [])
-
-    return {"analysts": analysts}
+    # 转换为字典以兼容checkpoint序列化
+    return {"analysts": [a.model_dump() for a in analysts]}
 
 
 def generate_question(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -63,19 +85,12 @@ def generate_question(state: Dict[str, Any]) -> Dict[str, Any]:
 
 def search_web(state: Dict[str, Any]) -> Dict[str, Any]:
     """Tavily Web搜索"""
-    # 生成搜索查询
-    search_query_prompt = search_instructions
     messages = state["messages"]
 
-    from langchain_core.output_parsers import JsonOutputParser
-    parser = JsonOutputParser()
+    structured_llm = get_llm().with_structured_output(SearchQuery)
+    search_query = structured_llm.invoke([search_instructions] + messages)
 
-    # 从对话中提取搜索查询
-    query_gen_chain = get_llm() | parser
-    search_query = query_gen_chain.invoke([SystemMessage(content=search_query_prompt)] + messages)
-
-    # 执行Tavily搜索
-    docs = get_tavily_tool().invoke(search_query.get("search_query", ""))
+    docs = get_tavily_tool().invoke(search_query.search_query or "")
 
     formatted = f'\n\n---\n\n{docs}\n\n---'
 
@@ -84,18 +99,12 @@ def search_web(state: Dict[str, Any]) -> Dict[str, Any]:
 
 def search_bocha(state: Dict[str, Any]) -> Dict[str, Any]:
     """Bocha Web搜索"""
-    search_query_prompt = search_instructions
     messages = state["messages"]
 
-    from langchain_core.output_parsers import JsonOutputParser
-    parser = JsonOutputParser()
+    structured_llm = get_llm().with_structured_output(SearchQuery)
+    search_query = structured_llm.invoke([search_instructions] + messages)
 
-    query_gen_chain = get_llm() | parser
-    search_query = query_gen_chain.invoke([SystemMessage(content=search_query_prompt)] + messages)
-
-    # 执行Bocha搜索
-    query = search_query.get("search_query", "")
-    docs = bocha_tool._run(query=query, count=10)
+    docs = bocha_tool._run(query=search_query.search_query or "", count=10)
 
     formatted = f'\n\n---\n\n{docs}\n\n---'
 
@@ -152,7 +161,6 @@ def write_section(state: Dict[str, Any]) -> Dict[str, Any]:
     """撰写报告小节"""
     analyst = state["analyst"]
     context = state.get("context", [])
-    interview = state.get("interview", "")
 
     system_msg = section_writer_instructions.format(focus=analyst["description"])
 

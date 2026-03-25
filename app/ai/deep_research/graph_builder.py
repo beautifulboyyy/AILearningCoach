@@ -1,8 +1,10 @@
 """Deep Research 图构建"""
 from typing import Dict, Any, List
 from langgraph.graph import StateGraph, START, END
-from langgraph.constants import Send
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import Send
+
+from langchain_core.messages import HumanMessage
 
 from app.ai.deep_research.state import InterviewState, ResearchGraphState
 from app.ai.deep_research.nodes import (
@@ -44,20 +46,24 @@ def build_interview_subgraph():
 def initiate_all_interviews(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     """启动所有并行访谈 - Map步骤"""
     feedback = state.get("human_analyst_feedback")
+    analysts = state.get("analysts")
+
     if feedback:
         return "create_analysts"
 
-    topic = state["topic"]
-    analysts = state["analysts"]
+    if not analysts:
+        return "create_analysts"
 
-    return [
+    topic = state["topic"]
+    sends = [
         Send("conduct_interview", {
             "analyst": analyst,
-            "messages": [("user", f"所以你说你在写一篇关于{topic}的文章?")],
+            "messages": [HumanMessage(content=f"所以你说你在写一篇关于{topic}的文章?")],
             "max_num_turns": 3,
         })
         for analyst in analysts
     ]
+    return sends
 
 
 def build_research_graph():
