@@ -34,7 +34,7 @@ def build_interview_subgraph():
     builder.add_conditional_edges(
         "answer_question",
         route_messages,
-        {"ask_question": "ask_question", "save_interview": "save_interview"}
+        ["ask_question", "save_interview"]
     )
 
     builder.add_edge("save_interview", "write_section")
@@ -51,8 +51,9 @@ def initiate_all_interviews(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     if feedback:
         return "create_analysts"
 
-    if not analysts:
-        return "create_analysts"
+    # 注意：不要在这里添加 if not analysts 检查！
+    # 如果 analysts 为空，应该返回空的 Send 列表，让 graph 自然结束
+    # 而不是循环回 create_analysts 导致无限循环
 
     topic = state["topic"]
     sends = [
@@ -86,7 +87,7 @@ def build_research_graph():
     builder.add_conditional_edges(
         "human_feedback",
         initiate_all_interviews,
-        {"create_analysts": "create_analysts", "conduct_interview": "conduct_interview"}
+        ["create_analysts", "conduct_interview"]
     )
 
     builder.add_edge("conduct_interview", "write_report")

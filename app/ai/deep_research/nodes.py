@@ -61,12 +61,16 @@ def create_analysts(state: Dict[str, Any]) -> Dict[str, Any]:
             SystemMessage(content=system_msg),
             HumanMessage(content="生成分析师集合。")
         ])
-        analysts = result.analysts if result else []
-    except Exception:
+        if result is None or not hasattr(result, 'analysts') or result.analysts is None:
+            analysts = []
+        else:
+            analysts = result.analysts
+    except Exception as e:
+        print(f"[ERROR] create_analysts failed: {e}")
         analysts = []
 
     # 转换为字典以兼容checkpoint序列化
-    return {"analysts": [a.model_dump() for a in analysts]}
+    return {"analysts": [a.model_dump() if hasattr(a, 'model_dump') else a for a in analysts]}
 
 
 def generate_question(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -78,7 +82,11 @@ def generate_question(state: Dict[str, Any]) -> Dict[str, Any]:
     persona = f"Name: {analyst['name']}\nRole: {analyst['role']}\nAffiliation: {analyst['affiliation']}\nDescription: {analyst['description']}"
 
     system_msg = question_instructions.format(goals=persona)
-    question = get_llm().invoke([SystemMessage(content=system_msg)] + messages)
+    try:
+        question = get_llm().invoke([SystemMessage(content=system_msg)] + messages)
+    except Exception as e:
+        print(f"[ERROR] generate_question failed: {e}")
+        question = AIMessage(content="抱歉，我无法生成问题。")
 
     return {"messages": [question]}
 
@@ -87,10 +95,19 @@ def search_web(state: Dict[str, Any]) -> Dict[str, Any]:
     """Tavily Web搜索"""
     messages = state["messages"]
 
-    structured_llm = get_llm().with_structured_output(SearchQuery)
-    search_query = structured_llm.invoke([search_instructions] + messages)
+    try:
+        structured_llm = get_llm().with_structured_output(SearchQuery)
+        search_query = structured_llm.invoke([SystemMessage(content=search_instructions)] + messages)
+        query_str = getattr(search_query, 'search_query', None) or ""
+    except Exception as e:
+        print(f"[ERROR] search_web LLM failed: {e}")
+        query_str = ""
 
-    docs = get_tavily_tool().invoke(search_query.search_query or "")
+    try:
+        docs = get_tavily_tool().invoke(query_str)
+    except Exception as e:
+        print(f"[ERROR] search_web tavily failed: {e}")
+        docs = ""
 
     formatted = f'\n\n---\n\n{docs}\n\n---'
 
@@ -101,10 +118,19 @@ def search_bocha(state: Dict[str, Any]) -> Dict[str, Any]:
     """Bocha Web搜索"""
     messages = state["messages"]
 
-    structured_llm = get_llm().with_structured_output(SearchQuery)
-    search_query = structured_llm.invoke([search_instructions] + messages)
+    try:
+        structured_llm = get_llm().with_structured_output(SearchQuery)
+        search_query = structured_llm.invoke([SystemMessage(content=search_instructions)] + messages)
+        query_str = getattr(search_query, 'search_query', None) or ""
+    except Exception as e:
+        print(f"[ERROR] search_bocha LLM failed: {e}")
+        query_str = ""
 
-    docs = bocha_tool._run(query=search_query.search_query or "", count=10)
+    try:
+        docs = bocha_tool._run(query=query_str, count=10)
+    except Exception as e:
+        print(f"[ERROR] search_bocha failed: {e}")
+        docs = ""
 
     formatted = f'\n\n---\n\n{docs}\n\n---'
 
@@ -124,8 +150,12 @@ def generate_answer(state: Dict[str, Any]) -> Dict[str, Any]:
         context="\n".join(context)
     )
 
-    answer = get_llm().invoke([SystemMessage(content=system_msg)] + messages)
-    answer.name = "expert"
+    try:
+        answer = get_llm().invoke([SystemMessage(content=system_msg)] + messages)
+        answer.name = "expert"
+    except Exception as e:
+        print(f"[ERROR] generate_answer failed: {e}")
+        answer = AIMessage(content="抱歉，我无法生成回答。", name="expert")
 
     return {"messages": [answer]}
 
@@ -143,9 +173,11 @@ def route_messages(state: Dict[str, Any]) -> str:
     if num_responses >= max_num_turns:
         return "save_interview"
 
-    last_msg = messages[-1]
-    if isinstance(last_msg, HumanMessage) and "非常感谢您的帮助" in last_msg.content:
-        return "save_interview"
+    # Check if analyst ended the interview (check second-to-last message, which is the analyst's question)
+    if len(messages) >= 2:
+        last_question = messages[-2]
+        if isinstance(last_question, HumanMessage) and "非常感谢您的帮助" in last_question.content:
+            return "save_interview"
 
     return "ask_question"
 
@@ -164,34 +196,42 @@ def write_section(state: Dict[str, Any]) -> Dict[str, Any]:
 
     system_msg = section_writer_instructions.format(focus=analyst["description"])
 
-    section = get_llm().invoke([
-        SystemMessage(content=system_msg),
-        HumanMessage(content=f"使用这些来源撰写你的小节: {context}")
-    ])
+    try:
+        section = get_llm().invoke([
+            SystemMessage(content=system_msg),
+            HumanMessage(content=f"使用这些来源撰写你的小节: {context}")
+        ])
+    except Exception as e:
+        print(f"[ERROR] write_section failed: {e}")
+        section = type('obj', (object,), {'content': ''})()
 
     return {"sections": [section.content]}
 
 
 def write_report(state: Dict[str, Any]) -> Dict[str, Any]:
     """撰写报告主体"""
-    sections = state["sections"]
-    topic = state["topic"]
+    sections = state.get("sections", [])
+    topic = state.get("topic", "")
 
     formatted = "\n\n".join(sections)
     system_msg = report_writer_instructions.format(topic=topic, context=formatted)
 
-    report = get_llm().invoke([
-        SystemMessage(content=system_msg),
-        HumanMessage(content="基于这些备忘录撰写报告。")
-    ])
+    try:
+        report = get_llm().invoke([
+            SystemMessage(content=system_msg),
+            HumanMessage(content="基于这些备忘录撰写报告。")
+        ])
+    except Exception as e:
+        print(f"[ERROR] write_report failed: {e}")
+        report = type('obj', (object,), {'content': ''})()
 
     return {"content": report.content}
 
 
 def write_introduction(state: Dict[str, Any]) -> Dict[str, Any]:
     """撰写引言"""
-    sections = state["sections"]
-    topic = state["topic"]
+    sections = state.get("sections", [])
+    topic = state.get("topic", "")
 
     formatted = "\n\n".join(sections)
     instructions = intro_conclusion_instructions.format(
@@ -199,18 +239,22 @@ def write_introduction(state: Dict[str, Any]) -> Dict[str, Any]:
         formatted_str_sections=formatted
     )
 
-    intro = get_llm().invoke([
-        SystemMessage(content=instructions),
-        HumanMessage(content="撰写报告引言")
-    ])
+    try:
+        intro = get_llm().invoke([
+            SystemMessage(content=instructions),
+            HumanMessage(content="撰写报告引言")
+        ])
+    except Exception as e:
+        print(f"[ERROR] write_introduction failed: {e}")
+        intro = type('obj', (object,), {'content': ''})()
 
     return {"introduction": intro.content}
 
 
 def write_conclusion(state: Dict[str, Any]) -> Dict[str, Any]:
     """撰写结论"""
-    sections = state["sections"]
-    topic = state["topic"]
+    sections = state.get("sections", [])
+    topic = state.get("topic", "")
 
     formatted = "\n\n".join(sections)
     instructions = intro_conclusion_instructions.format(
@@ -218,17 +262,25 @@ def write_conclusion(state: Dict[str, Any]) -> Dict[str, Any]:
         formatted_str_sections=formatted
     )
 
-    conclusion = get_llm().invoke([
-        SystemMessage(content=instructions),
-        HumanMessage(content="撰写报告结论")
-    ])
+    try:
+        conclusion = get_llm().invoke([
+            SystemMessage(content=instructions),
+            HumanMessage(content="撰写报告结论")
+        ])
+    except Exception as e:
+        print(f"[ERROR] write_conclusion failed: {e}")
+        conclusion = type('obj', (object,), {'content': ''})()
 
     return {"conclusion": conclusion.content}
 
 
 def finalize_report(state: Dict[str, Any]) -> Dict[str, Any]:
     """整合最终报告"""
-    content = state["content"]
+    content = state.get("content", "")
+
+    # Handle content that starts with "## Insights"
+    if content.startswith("## Insights"):
+        content = content[len("## Insights"):].strip()
 
     if "## Sources" in content:
         try:
@@ -238,12 +290,15 @@ def finalize_report(state: Dict[str, Any]) -> Dict[str, Any]:
     else:
         sources = None
 
+    introduction = state.get("introduction", "")
+    conclusion = state.get("conclusion", "")
+
     final_report = (
-        state["introduction"] +
+        introduction +
         "\n\n---\n\n" +
         content +
         "\n\n---\n\n" +
-        state["conclusion"]
+        conclusion
     )
 
     if sources:
