@@ -101,7 +101,6 @@ def build_research_graph():
 
     memory = MemorySaver()
     return builder.compile(
-        interrupt_before=["human_feedback"],
         checkpointer=memory
     )
 

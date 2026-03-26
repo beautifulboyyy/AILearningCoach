@@ -90,7 +90,7 @@ class DeepResearchService:
     async def run_research_sync(self, thread_id: str, topic: str, max_analysts: int) -> Dict[str, Any]:
         """同步运行研究工作流，直接返回完整结果（无流式输出）"""
         import asyncio
-        from functools import partial
+        import traceback
 
         config = {"configurable": {"thread_id": thread_id}}
 
@@ -104,12 +104,22 @@ class DeepResearchService:
 
         def _invoke_graph():
             """在同步线程中执行 graph.invoke()"""
-            return research_graph.invoke(initial_state, config)
+            print(f"[DEBUG] Invoking graph with state: topic={topic}, max_analysts={max_analysts}")
+            result = research_graph.invoke(initial_state, config)
+            print(f"[DEBUG] Graph invoke returned. Keys: {list(result.keys()) if result else 'None'}")
+            print(f"[DEBUG] sections: {len(result.get('sections', [])) if result else 0}")
+            print(f"[DEBUG] final_report length: {len(result.get('final_report', '')) if result else 0}")
+            return result
 
         try:
             # 在线程池中执行同步的 graph.invoke()
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, _invoke_graph)
+
+            if not result:
+                print("[DEBUG] Result is None or empty!")
+                await self.update_task_status(thread_id, ResearchStatus.FAILED)
+                return {"status": "failed", "error": "Graph returned None", "final_report": "", "sections_count": 0}
 
             final_report = result.get("final_report", "")
 
@@ -126,6 +136,8 @@ class DeepResearchService:
             }
 
         except Exception as e:
+            error_msg = f"{e}\n{traceback.format_exc()}"
+            print(f"[DEBUG] Exception in run_research_sync: {error_msg}")
             await self.update_task_status(thread_id, ResearchStatus.FAILED)
             return {
                 "status": "failed",
