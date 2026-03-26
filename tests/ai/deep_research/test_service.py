@@ -210,8 +210,13 @@ async def test_submit_feedback_empty_continues(service, mock_db):
 
 
 def test_classify_event_create_analysts(service):
-    """测试分类create_analysts事件"""
-    event = {"create_analysts": {"status": "complete"}}
+    """测试分类create_analysts事件（使用astream_events格式）"""
+    # astream_events 返回的事件格式
+    event = {
+        "event": "on_chain_start",
+        "name": "create_analysts",
+        "data": {}
+    }
 
     result = service._classify_event(event)
 

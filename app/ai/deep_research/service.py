@@ -87,8 +87,53 @@ class DeepResearchService:
 
         return {"status": "continued"}
 
+    async def run_research_sync(self, thread_id: str, topic: str, max_analysts: int) -> Dict[str, Any]:
+        """同步运行研究工作流，直接返回完整结果（无流式输出）"""
+        import asyncio
+        from functools import partial
+
+        config = {"configurable": {"thread_id": thread_id}}
+
+        await self.update_task_status(thread_id, ResearchStatus.RUNNING)
+
+        initial_state = {
+            "topic": topic,
+            "max_analysts": max_analysts,
+            "human_analyst_feedback": "",
+        }
+
+        def _invoke_graph():
+            """在同步线程中执行 graph.invoke()"""
+            return research_graph.invoke(initial_state, config)
+
+        try:
+            # 在线程池中执行同步的 graph.invoke()
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, _invoke_graph)
+
+            final_report = result.get("final_report", "")
+
+            await self.update_task_status(
+                thread_id,
+                ResearchStatus.COMPLETED,
+                final_report=final_report
+            )
+
+            return {
+                "status": "completed",
+                "final_report": final_report,
+                "sections_count": len(result.get("sections", []))
+            }
+
+        except Exception as e:
+            await self.update_task_status(thread_id, ResearchStatus.FAILED)
+            return {
+                "status": "failed",
+                "error": str(e)
+            }
+
     async def run_research(self, thread_id: str, topic: str, max_analysts: int) -> AsyncGenerator[Dict[str, Any], None]:
-        """运行研究工作流"""
+        """运行研究工作流（SSE流式版本，已废弃，请使用 run_research_sync）"""
         config = {"configurable": {"thread_id": thread_id}}
 
         await self.update_task_status(thread_id, ResearchStatus.RUNNING)

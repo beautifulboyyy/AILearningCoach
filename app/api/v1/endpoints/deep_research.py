@@ -4,6 +4,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
@@ -15,6 +16,14 @@ from app.ai.deep_research.service import DeepResearchService
 
 
 router = APIRouter()
+
+
+class ExecuteResearchResponse(BaseModel):
+    """同步执行研究任务的响应"""
+    status: str
+    final_report: str = ""
+    sections_count: int = 0
+    error: str = ""
 
 
 @router.post("/start", response_model=ResearchTaskResponse)
@@ -53,6 +62,31 @@ async def get_research_task(
         raise HTTPException(status_code=404, detail="任务不存在")
 
     return ResearchTaskResponse.model_validate(task)
+
+
+@router.post("/{thread_id}/execute", response_model=ExecuteResearchResponse)
+async def execute_research(
+    thread_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """同步执行研究任务，等待完成后返回完整报告
+
+    这是推荐使用的端点，不需要流式处理，
+    只需一个按钮点击后展示完整报告即可。
+    """
+    service = DeepResearchService(db)
+
+    task = await service.get_task_by_thread_id(thread_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    result = await service.run_research_sync(
+        thread_id,
+        task.topic,
+        task.max_analysts
+    )
+
+    return ExecuteResearchResponse(**result)
 
 
 @router.post("/{thread_id}/feedback")
@@ -95,7 +129,7 @@ async def stream_research_events(
     thread_id: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """SSE流式事件"""
+    """SSE流式事件（已废弃，请使用 POST /{thread_id}/execute）"""
     service = DeepResearchService(db)
 
     task = await service.get_task_by_thread_id(thread_id)
