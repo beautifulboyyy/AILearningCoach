@@ -183,10 +183,11 @@ class DeepResearchService:
 
     def _classify_event(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """分类事件类型"""
-        event_name = event.get("name", "")
-        event_type = event.get("event", "")
+        event_name = event.get("name") or ""
+        event_type = event.get("event") or ""
 
-        if event_type == "on_chain_end" and "final_report" in event.get("data", {}).get("output", {}):
+        output = event.get("data", {}).get("output")
+        if output is not None and "final_report" in output:
             return None  # 忽略最终输出事件
 
         if "create_analysts" in event_name:
