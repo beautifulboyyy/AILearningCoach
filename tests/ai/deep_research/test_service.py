@@ -1,16 +1,15 @@
 """Deep Research Service层单元测试"""
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.ai.deep_research.service import DeepResearchService
-from app.models.research_task import ResearchTask, ResearchStatus
+from app.models.research_task import ResearchStatus
 from app.schemas.deep_research import StartResearchRequest
 
 
 @pytest.fixture
 def mock_db():
     """模拟数据库会话"""
-    from unittest.mock import AsyncMock, MagicMock
-
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
@@ -22,7 +21,6 @@ def mock_db():
 @pytest.fixture
 def mock_config():
     """模拟配置"""
-    from unittest.mock import MagicMock
     config = MagicMock()
     config.max_turns = 3
     return config
@@ -31,7 +29,6 @@ def mock_config():
 @pytest.fixture
 def service(mock_db, mock_config):
     """创建Service实例"""
-    from unittest.mock import patch
     with patch("app.ai.deep_research.service.get_config", return_value=mock_config):
         svc = DeepResearchService(mock_db)
     return svc
@@ -40,8 +37,6 @@ def service(mock_db, mock_config):
 @pytest.mark.asyncio
 async def test_create_task_generates_thread_id(service, mock_db):
     """测试创建任务生成thread_id"""
-    from unittest.mock import MagicMock
-
     request = StartResearchRequest(topic="LangGraph优势分析", max_analysts=3)
 
     await service.create_task(request)
@@ -75,8 +70,6 @@ async def test_create_task_with_analyst_directions(service, mock_db):
 @pytest.mark.asyncio
 async def test_get_task_returns_task(service, mock_db):
     """测试获取存在的任务"""
-    from unittest.mock import MagicMock
-
     mock_task = MagicMock()
     mock_task.thread_id = "research_123"
     mock_result = MagicMock()
@@ -92,8 +85,6 @@ async def test_get_task_returns_task(service, mock_db):
 @pytest.mark.asyncio
 async def test_get_task_returns_none_for_missing(service, mock_db):
     """测试获取不存在的任务返回None"""
-    from unittest.mock import MagicMock
-
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
     mock_db.execute.return_value = mock_result
@@ -106,8 +97,6 @@ async def test_get_task_returns_none_for_missing(service, mock_db):
 @pytest.mark.asyncio
 async def test_list_tasks_returns_list(service, mock_db):
     """测试获取任务列表"""
-    from unittest.mock import MagicMock
-
     mock_tasks = [MagicMock(), MagicMock()]
     mock_result = MagicMock()
     mock_scalars = MagicMock()
@@ -124,8 +113,6 @@ async def test_list_tasks_returns_list(service, mock_db):
 @pytest.mark.asyncio
 async def test_update_status_to_running(service, mock_db):
     """测试更新状态为running"""
-    from unittest.mock import MagicMock
-
     mock_task = MagicMock()
     mock_task.status = ResearchStatus.PENDING
     mock_result = MagicMock()
@@ -141,8 +128,6 @@ async def test_update_status_to_running(service, mock_db):
 @pytest.mark.asyncio
 async def test_update_status_with_final_report(service, mock_db):
     """测试更新状态并设置final_report"""
-    from unittest.mock import MagicMock
-
     mock_task = MagicMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_task
@@ -161,8 +146,6 @@ async def test_update_status_with_final_report(service, mock_db):
 @pytest.mark.asyncio
 async def test_update_status_task_not_found(service, mock_db):
     """测试更新不存在的任务"""
-    from unittest.mock import MagicMock
-
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
     mock_db.execute.return_value = mock_result
@@ -175,8 +158,6 @@ async def test_update_status_task_not_found(service, mock_db):
 @pytest.mark.asyncio
 async def test_submit_feedback_with_text(service, mock_db):
     """测试提交具体反馈"""
-    from unittest.mock import MagicMock, patch
-
     mock_task = MagicMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_task
@@ -194,8 +175,6 @@ async def test_submit_feedback_with_text(service, mock_db):
 @pytest.mark.asyncio
 async def test_submit_feedback_empty_continues(service, mock_db):
     """测试空反馈继续执行"""
-    from unittest.mock import MagicMock, patch
-
     mock_task = MagicMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_task
@@ -231,3 +210,58 @@ def test_classify_event_unknown(service):
     result = service._classify_event(event)
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_run_research_sync_marks_failed_when_graph_returns_empty(service):
+    """测试 graph 返回空结果时任务会标记为失败"""
+    service.update_task_status = AsyncMock()
+
+    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
+        mock_graph.invoke.return_value = {}
+
+        result = await service.run_research_sync("research_123", "测试主题", 2)
+
+    assert result["status"] == "failed"
+    assert result["error"] == "Graph returned None"
+    assert service.update_task_status.await_args_list[0].args[1] == ResearchStatus.RUNNING
+    assert service.update_task_status.await_args_list[-1].args[1] == ResearchStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_run_research_sync_marks_completed_with_report(service):
+    """测试 graph 成功返回时任务会写入完成状态和报告"""
+    service.update_task_status = AsyncMock()
+
+    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
+        mock_graph.invoke.return_value = {
+            "final_report": "# 报告",
+            "sections": ["A", "B"],
+        }
+
+        result = await service.run_research_sync("research_123", "测试主题", 2)
+
+    assert result == {
+        "status": "completed",
+        "final_report": "# 报告",
+        "sections_count": 2,
+    }
+    assert service.update_task_status.await_args_list[0].args[1] == ResearchStatus.RUNNING
+    assert service.update_task_status.await_args_list[-1].args[1] == ResearchStatus.COMPLETED
+    assert service.update_task_status.await_args_list[-1].kwargs["final_report"] == "# 报告"
+
+
+@pytest.mark.asyncio
+async def test_run_research_sync_marks_failed_when_graph_raises(service):
+    """测试 graph 抛错时任务会返回失败结果"""
+    service.update_task_status = AsyncMock()
+
+    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
+        mock_graph.invoke.side_effect = RuntimeError("boom")
+
+        result = await service.run_research_sync("research_123", "测试主题", 2)
+
+    assert result["status"] == "failed"
+    assert result["error"] == "boom"
+    assert service.update_task_status.await_args_list[0].args[1] == ResearchStatus.RUNNING
+    assert service.update_task_status.await_args_list[-1].args[1] == ResearchStatus.FAILED
