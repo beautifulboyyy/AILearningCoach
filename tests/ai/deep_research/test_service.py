@@ -265,3 +265,23 @@ async def test_run_research_sync_marks_failed_when_graph_raises(service):
     assert result["error"] == "boom"
     assert service.update_task_status.await_args_list[0].args[1] == ResearchStatus.RUNNING
     assert service.update_task_status.await_args_list[-1].args[1] == ResearchStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_run_research_sync_marks_failed_when_final_report_empty(service):
+    """测试 graph 返回空报告时不会误标记为完成"""
+    service.update_task_status = AsyncMock()
+
+    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
+        mock_graph.invoke.return_value = {
+            "final_report": "",
+            "sections": ["只有小节，没有最终报告"],
+        }
+
+        result = await service.run_research_sync("research_123", "测试主题", 2)
+
+    assert result["status"] == "failed"
+    assert result["error"] == "Graph returned empty final_report"
+    assert result["final_report"] == ""
+    assert result["sections_count"] == 1
+    assert service.update_task_status.await_args_list[-1].args[1] == ResearchStatus.FAILED
