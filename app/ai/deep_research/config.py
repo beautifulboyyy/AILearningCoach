@@ -1,10 +1,12 @@
 """Deep Research 配置"""
 from pydantic_settings import BaseSettings
+from pydantic_settings import SettingsConfigDict
 from functools import lru_cache
 
 
 class DeepResearchConfig(BaseSettings):
     """Deep Research 并行度配置"""
+    model_config = SettingsConfigDict(env_prefix="DEEP_RESEARCH_")
 
     max_analysts: int = 5  # 最大分析师数量
     max_turns: int = 3    # 每个访谈最大轮次
@@ -20,10 +22,6 @@ class DeepResearchConfig(BaseSettings):
 
     # 超时配置
     global_timeout_minutes: int = 30
-
-    class Config:
-        env_prefix = "DEEP_RESEARCH_"
-
 
 @lru_cache
 def get_config() -> DeepResearchConfig:

@@ -1,7 +1,7 @@
 """
 数据库基础模块
 """
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy import Column, Integer, DateTime
 from datetime import datetime
 

@@ -3,7 +3,7 @@
 """
 from typing import Optional
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -28,6 +28,11 @@ ENV_FILE = resolve_env_file()
 
 class Settings(BaseSettings):
     """应用配置"""
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE),
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+    )
     
     # 项目信息
     PROJECT_NAME: str = "AI Learning Coach"
@@ -95,11 +100,5 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"
     
-    class Config:
-        env_file = str(ENV_FILE)
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-
-
 # 创建全局配置实例
 settings = Settings()

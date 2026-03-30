@@ -1,7 +1,7 @@
 """Deep Research Pydantic Schemas"""
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from uuid import UUID
 
 
@@ -22,6 +22,8 @@ class StartResearchRequest(BaseModel):
 
 class ResearchTaskResponse(BaseModel):
     """研究任务响应"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     thread_id: str
     topic: str
@@ -31,10 +33,6 @@ class ResearchTaskResponse(BaseModel):
     final_report: Optional[str]
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 class HumanFeedbackRequest(BaseModel):
     """人类反馈请求"""
