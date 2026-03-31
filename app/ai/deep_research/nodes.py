@@ -188,6 +188,37 @@ def ensure_markdown_heading(content: str, heading: str) -> str:
     return f"{heading}\n{stripped}"
 
 
+def ensure_introduction_shape(content: str, topic: str) -> str:
+    """确保引言包含总标题与单个引言标题，避免重复。"""
+    stripped = (content or "").strip()
+    if not stripped:
+        return f"# {topic} 研究报告\n\n## 引言"
+
+    lines = [line.rstrip() for line in stripped.splitlines()]
+    title_line = f"# {topic} 研究报告"
+    has_title = any(line.strip().startswith("# ") for line in lines)
+    has_intro_heading = any(line.strip() == "## 引言" for line in lines)
+
+    if not has_title:
+        lines.insert(0, title_line)
+
+    if not has_intro_heading:
+        insert_at = 1 if lines and lines[0].startswith("# ") else 0
+        lines.insert(insert_at, "")
+        lines.insert(insert_at + 1, "## 引言")
+
+    seen_intro = False
+    normalized_lines: List[str] = []
+    for line in lines:
+        if line.strip() == "## 引言":
+            if seen_intro:
+                continue
+            seen_intro = True
+        normalized_lines.append(line)
+
+    return "\n".join(normalized_lines).strip()
+
+
 def ensure_main_body_heading(content: str) -> str:
     """确保主体内容使用统一标题。"""
     stripped = (content or "").strip()
@@ -465,7 +496,7 @@ def write_introduction(state: Dict[str, Any], config: RunnableConfig | None = No
         print(f"[ERROR] write_introduction failed: {e}")
         intro = type('obj', (object,), {'content': ''})()
 
-    return {"introduction": ensure_markdown_heading(intro.content, "## 引言")}
+    return {"introduction": ensure_introduction_shape(intro.content, topic)}
 
 
 def write_conclusion(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:

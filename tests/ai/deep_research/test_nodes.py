@@ -308,5 +308,5 @@ def test_write_introduction_and_conclusion_keep_expected_headings(monkeypatch):
     conclusion = write_conclusion({"topic": "Agent", "sections": ["## 小节\n内容"]})
 
     assert "# Agent 研究报告" in intro["introduction"]
-    assert "## 引言" in intro["introduction"]
+    assert intro["introduction"].count("## 引言") == 1
     assert conclusion["conclusion"].startswith("## 结论")
