@@ -2,7 +2,7 @@
 API v1 路由汇总
 """
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, chat, profile, memory, learning_path, task, progress, agents, deepresearch
+from app.api.v1.endpoints import auth, chat, profile, memory, learning_path, task, progress, agents, deep_research
 
 api_router = APIRouter()
 
@@ -30,5 +30,5 @@ api_router.include_router(task.router, prefix="/tasks", tags=["任务管理"])
 # 学习进度路由
 api_router.include_router(progress.router, prefix="/progress", tags=["学习进度"])
 
-# DeepResearch 路由
-api_router.include_router(deepresearch.router, prefix="/deepresearch", tags=["DeepResearch"])
+# 深度研究路由
+api_router.include_router(deep_research.router, prefix="/deep-research", tags=["深度研究"])

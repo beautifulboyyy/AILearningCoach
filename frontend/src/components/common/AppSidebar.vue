@@ -28,11 +28,6 @@
         <el-icon><ChatDotRound /></el-icon>
         <template #title>智能对话</template>
       </el-menu-item>
-      
-      <el-menu-item index="/deepresearch">
-        <el-icon><Connection /></el-icon>
-        <template #title>深度研究</template>
-      </el-menu-item>
 
       <el-menu-item index="/learning-path">
         <el-icon><TrendCharts /></el-icon>
@@ -42,6 +37,11 @@
       <el-menu-item index="/tasks">
         <el-icon><List /></el-icon>
         <template #title>任务管理</template>
+      </el-menu-item>
+
+      <el-menu-item index="/deep-research">
+        <el-icon><Compass /></el-icon>
+        <template #title>Deep Research</template>
       </el-menu-item>
       
       <el-menu-item index="/progress">
@@ -62,7 +62,7 @@ import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { 
   Reading, HomeFilled, ChatDotRound, TrendCharts, 
-  List, DataAnalysis, User, Connection
+  List, DataAnalysis, User, Compass
 } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 

@@ -3,7 +3,7 @@
 """
 from typing import Optional
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -28,6 +28,11 @@ ENV_FILE = resolve_env_file()
 
 class Settings(BaseSettings):
     """应用配置"""
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE),
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+    )
     
     # 项目信息
     PROJECT_NAME: str = "AI Learning Coach"
@@ -46,6 +51,11 @@ class Settings(BaseSettings):
     def DATABASE_URL(self) -> str:
         """数据库连接URL"""
         return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
+    @property
+    def DATABASE_SYNC_URL(self) -> str:
+        """同步数据库连接URL，供 LangGraph 持久化等同步客户端使用"""
+        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
     
     # Redis配置
     REDIS_HOST: str
@@ -80,6 +90,10 @@ class Settings(BaseSettings):
     MINERU_API_MODE: str = "precision"
     MINERU_TOKEN: Optional[str] = None
     MINERU_TIMEOUT: int = 1200
+
+    # Deep Research API Keys
+    TAVILY_API_KEY: Optional[str] = None
+    BOCHA_API_KEY: Optional[str] = None
     
     # JWT配置
     SECRET_KEY: str
@@ -95,11 +109,5 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"
     
-    class Config:
-        env_file = str(ENV_FILE)
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-
-
 # 创建全局配置实例
 settings = Settings()

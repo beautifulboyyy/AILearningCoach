@@ -1,0 +1,235 @@
+"""Deep Research 服务层"""
+import uuid
+import asyncio
+from copy import deepcopy
+from typing import Dict, Any, Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from langgraph.types import Command
+
+from app.models.research_task import ResearchTask, ResearchStatus
+from app.schemas.deep_research import StartResearchRequest
+from app.ai.deep_research.graph_builder import research_graph
+from app.ai.deep_research.config import get_config
+from app.ai.deep_research.progress import (
+    clear_progress as clear_runtime_progress,
+    get_progress as get_runtime_progress,
+    update_progress as update_runtime_progress,
+)
+
+
+class DeepResearchService:
+    """Deep Research 服务"""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.config = get_config()
+
+    def get_progress(self, thread_id: str) -> Dict[str, str]:
+        """获取任务运行时进度。"""
+        return get_runtime_progress(thread_id)
+
+    def update_progress(self, thread_id: str, stage: str, message: str) -> Dict[str, str]:
+        """更新任务运行时进度。"""
+        return update_runtime_progress(thread_id, stage, message)
+
+    def clear_progress(self, thread_id: str):
+        """清理任务运行时进度。"""
+        clear_runtime_progress(thread_id)
+
+    async def _invoke_graph_in_executor(self, graph_input: Any, config: Dict[str, Any]) -> Dict[str, Any]:
+        """在线程池中执行阻塞式 graph.invoke，便于并发查询进度。"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: research_graph.invoke(graph_input, config),
+        )
+
+    async def create_task(self, request: StartResearchRequest) -> ResearchTask:
+        """创建新研究任务"""
+        thread_id = f"research_{uuid.uuid4().hex[:12]}"
+
+        task = ResearchTask(
+            thread_id=thread_id,
+            topic=request.topic,
+            status=ResearchStatus.PENDING,
+            max_analysts=request.max_analysts,
+            max_turns=self.config.max_turns,
+            analysts_config={
+                "directions": request.analyst_directions or [],
+                "analysts": [],
+            }
+        )
+
+        self.db.add(task)
+        await self.db.commit()
+        await self.db.refresh(task)
+
+        return task
+
+    async def get_task_by_thread_id(self, thread_id: str) -> Optional[ResearchTask]:
+        """通过thread_id获取任务"""
+        result = await self.db.execute(
+            select(ResearchTask).where(ResearchTask.thread_id == thread_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_tasks(self, limit: int = 50) -> list[ResearchTask]:
+        """获取任务列表"""
+        result = await self.db.execute(
+            select(ResearchTask)
+            .order_by(ResearchTask.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def delete_task(self, thread_id: str) -> bool:
+        """删除任务记录"""
+        task = await self.get_task_by_thread_id(thread_id)
+        if not task:
+            return False
+
+        await self.db.delete(task)
+        await self.db.commit()
+        self.clear_progress(thread_id)
+        return True
+
+    async def update_task_status(self, thread_id: str, status: ResearchStatus, final_report: str = None):
+        """更新任务状态"""
+        task = await self.get_task_by_thread_id(thread_id)
+        if task:
+            task.status = status
+            if final_report:
+                task.final_report = final_report
+            await self.db.commit()
+
+    def _extract_analysts(self, task: ResearchTask) -> list[dict]:
+        """从任务配置中提取分析师快照"""
+        config = task.analysts_config or {}
+        return config.get("analysts", [])
+
+    def _store_analysts(self, task: ResearchTask, analysts: list[dict]):
+        """将最新分析师快照写回任务配置"""
+        config = deepcopy(task.analysts_config or {})
+        config["analysts"] = analysts
+        task.analysts_config = config
+
+    async def _handle_graph_result(self, thread_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
+        """统一处理图执行结果"""
+        if not result:
+            await self.update_task_status(thread_id, ResearchStatus.FAILED)
+            self.clear_progress(thread_id)
+            return {
+                "status": "failed",
+                "thread_id": thread_id,
+                "message": "研究图未返回结果",
+                "error": "Graph returned None",
+                "final_report": "",
+                "sections_count": 0,
+            }
+
+        if "__interrupt__" in result:
+            state = research_graph.get_state({"configurable": {"thread_id": thread_id}})
+            analysts = state.values.get("analysts", [])
+            task = await self.get_task_by_thread_id(thread_id)
+            if task:
+                self._store_analysts(task, analysts)
+                await self.update_task_status(thread_id, ResearchStatus.AWAITING_FEEDBACK)
+            self.update_progress(thread_id, "awaiting_feedback", "请确认分析师或提供新的自然语言要求")
+            return {
+                "status": "awaiting_feedback",
+                "thread_id": thread_id,
+                "message": "请确认分析师或提供新的自然语言要求",
+                "analysts": analysts,
+                "final_report": "",
+                "sections_count": 0,
+                "error": "",
+            }
+
+        final_report = result.get("final_report", "")
+        sections_count = len(result.get("sections", []))
+
+        if not final_report.strip():
+            await self.update_task_status(thread_id, ResearchStatus.FAILED)
+            self.clear_progress(thread_id)
+            return {
+                "status": "failed",
+                "thread_id": thread_id,
+                "message": "研究图未生成有效报告",
+                "error": "Graph returned empty final_report",
+                "final_report": "",
+                "sections_count": sections_count,
+            }
+
+        await self.update_task_status(
+            thread_id,
+            ResearchStatus.COMPLETED,
+            final_report=final_report,
+        )
+        self.clear_progress(thread_id)
+        return {
+            "status": "completed",
+            "thread_id": thread_id,
+            "message": "研究完成",
+            "final_report": final_report,
+            "sections_count": sections_count,
+            "error": "",
+        }
+
+    async def generate_analysts(self, thread_id: str) -> Dict[str, Any]:
+        """生成分析师并在确认节点中断"""
+        task = await self.get_task_by_thread_id(thread_id)
+        if not task:
+            raise ValueError("任务不存在")
+
+        config = {"configurable": {"thread_id": thread_id}}
+        initial_state = {
+            "topic": task.topic,
+            "max_analysts": task.max_analysts,
+            "max_num_turns": task.max_turns,
+            "human_analyst_feedback": "",
+        }
+
+        self.update_progress(thread_id, "creating_analysts", "正在生成分析师")
+        result = research_graph.invoke(initial_state, config)
+        handled = await self._handle_graph_result(thread_id, result)
+        return {
+            "status": handled["status"],
+            "thread_id": thread_id,
+            "analysts": handled.get("analysts", []),
+            "interrupt_required": handled["status"] == "awaiting_feedback",
+        }
+
+    async def submit_feedback(self, thread_id: str, feedback: Optional[str]) -> Dict[str, Any]:
+        """提交人类反馈并继续执行或重新生成分析师"""
+        config = {"configurable": {"thread_id": thread_id}}
+        task = await self.get_task_by_thread_id(thread_id)
+        if not task:
+            raise ValueError("任务不存在")
+
+        if feedback:
+            self.update_progress(thread_id, "creating_analysts", "正在根据反馈重新生成分析师")
+            result = research_graph.invoke(
+                Command(resume={"action": "regenerate", "feedback": feedback}),
+                config,
+            )
+            handled = await self._handle_graph_result(thread_id, result)
+            return {
+                "status": handled["status"],
+                "thread_id": thread_id,
+                "message": "已根据反馈重新生成分析师",
+                "analysts": handled.get("analysts", []),
+                "final_report": "",
+                "sections_count": 0,
+                "error": "",
+            }
+
+        await self.update_task_status(thread_id, ResearchStatus.RUNNING)
+        self.update_progress(thread_id, "running", "正在开始研究")
+        result = await self._invoke_graph_in_executor(
+            Command(resume={"action": "approve"}),
+            config,
+        )
+        handled = await self._handle_graph_result(thread_id, result)
+        return handled

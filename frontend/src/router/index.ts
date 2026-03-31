@@ -34,18 +34,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '智能对话' }
       },
       {
-        path: 'deepresearch',
-        name: 'DeepResearch',
-        component: () => import('@/views/deepresearch/DeepResearchView.vue'),
-        meta: { title: '深度研究' }
-      },
-      {
-        path: 'deepresearch/:taskId/report',
-        name: 'DeepResearchReport',
-        component: () => import('@/views/deepresearch/DeepResearchReportView.vue'),
-        meta: { title: '研究报告' }
-      },
-      {
         path: 'learning-path',
         name: 'LearningPath',
         component: () => import('@/views/learning-path/PathView.vue'),
@@ -62,6 +50,18 @@ const routes: RouteRecordRaw[] = [
         name: 'Tasks',
         component: () => import('@/views/tasks/TasksView.vue'),
         meta: { title: '任务管理' }
+      },
+      {
+        path: 'deep-research',
+        name: 'DeepResearchWorkbench',
+        component: () => import('@/views/deep-research/DeepResearchWorkbench.vue'),
+        meta: { title: 'Deep Research' }
+      },
+      {
+        path: 'deep-research/:threadId/report',
+        name: 'DeepResearchReportView',
+        component: () => import('@/views/deep-research/DeepResearchReportView.vue'),
+        meta: { title: '研究报告' }
       },
       {
         path: 'progress',
