@@ -35,6 +35,7 @@ class ResearchGraphState(TypedDict):
     """主图状态"""
     topic: str
     max_analysts: int
+    max_num_turns: int
     human_analyst_feedback: Optional[str]
     analysts: List[Analyst]
     sections: Annotated[list, operator.add]

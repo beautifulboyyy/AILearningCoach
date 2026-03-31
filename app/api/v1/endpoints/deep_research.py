@@ -114,17 +114,13 @@ async def cancel_research(
     thread_id: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """取消研究任务"""
+    """删除研究任务"""
     service = DeepResearchService(db)
-
-    task = await service.get_task_by_thread_id(thread_id)
-    if not task:
+    deleted = await service.delete_task(thread_id)
+    if not deleted:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    from app.models.research_task import ResearchStatus
-    await service.update_task_status(thread_id, ResearchStatus.CANCELLED)
-
-    return {"status": "cancelled"}
+    return {"status": "deleted"}
 
 
 @router.post("/tasks/{thread_id}/execute", response_model=TaskOperationResponse)
@@ -138,7 +134,12 @@ async def execute_research(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    result = await service.run_research_sync(thread_id, task.topic, task.max_analysts)
+    result = await service.run_research_sync(
+        thread_id,
+        task.topic,
+        task.max_analysts,
+        task.max_turns,
+    )
     return TaskOperationResponse(**result)
 
 
@@ -158,7 +159,8 @@ async def stream_research_events(
         async for event in service.run_research(
             thread_id,
             task.topic,
-            task.max_analysts
+            task.max_analysts,
+            task.max_turns,
         ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 

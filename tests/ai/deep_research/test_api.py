@@ -82,6 +82,33 @@ class TestDeepResearchAPI:
             assert data["thread_id"] == "test-thread-123"
             assert data["status"] == "running"
 
+    def test_get_research_task_includes_awaiting_feedback_analysts(self, client):
+        """测试任务详情会返回等待确认的分析师快照"""
+        with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
+            mock_instance = MagicMock()
+            mock_task = MagicMock()
+            mock_task.id = "550e8400-e29b-41d4-a716-446655440000"
+            mock_task.thread_id = "test-thread-123"
+            mock_task.topic = "LangGraph优势分析"
+            mock_task.status = "awaiting_feedback"
+            mock_task.max_analysts = 3
+            mock_task.max_turns = 3
+            mock_task.analysts_config = {
+                "analysts": [{"name": "A", "affiliation": "Org", "role": "R", "description": "D"}]
+            }
+            mock_task.final_report = None
+            mock_task.created_at = "2026-03-25T10:00:00"
+            mock_task.updated_at = "2026-03-25T10:00:00"
+            mock_instance.get_task_by_thread_id = AsyncMock(return_value=mock_task)
+            mock_service.return_value = mock_instance
+
+            response = client.get("/api/v1/deep-research/tasks/test-thread-123")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "awaiting_feedback"
+            assert data["analysts"][0]["name"] == "A"
+
     def test_get_research_task_not_found(self, client):
         """测试获取不存在的任务"""
         with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
@@ -135,24 +162,22 @@ class TestDeepResearchAPI:
             assert response.json()["status"] == "awaiting_feedback"
 
     def test_cancel_research(self, client):
-        """测试取消研究任务"""
+        """测试删除研究任务"""
         with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
             mock_instance = MagicMock()
-            mock_task = MagicMock()
-            mock_instance.get_task_by_thread_id = AsyncMock(return_value=mock_task)
-            mock_instance.update_task_status = AsyncMock(return_value=True)
+            mock_instance.delete_task = AsyncMock(return_value=True)
             mock_service.return_value = mock_instance
 
             response = client.delete("/api/v1/deep-research/tasks/test-thread-123")
 
             assert response.status_code == 200
-            assert response.json()["status"] == "cancelled"
+            assert response.json()["status"] == "deleted"
 
     def test_cancel_research_not_found(self, client):
-        """测试取消不存在的任务"""
+        """测试删除不存在的任务"""
         with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
             mock_instance = MagicMock()
-            mock_instance.get_task_by_thread_id = AsyncMock(return_value=None)
+            mock_instance.delete_task = AsyncMock(return_value=False)
             mock_service.return_value = mock_instance
 
             response = client.delete("/api/v1/deep-research/tasks/nonexistent-thread")

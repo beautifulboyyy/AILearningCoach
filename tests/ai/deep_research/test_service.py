@@ -111,6 +111,37 @@ async def test_list_tasks_returns_list(service, mock_db):
 
 
 @pytest.mark.asyncio
+async def test_delete_task_removes_record(service, mock_db):
+    """测试删除任务会从数据库中移除记录"""
+    mock_task = MagicMock()
+    mock_task.thread_id = "research_123"
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_task
+    mock_db.execute.return_value = mock_result
+    mock_db.delete = AsyncMock()
+
+    deleted = await service.delete_task("research_123")
+
+    assert deleted is True
+    mock_db.delete.assert_awaited_once_with(mock_task)
+    mock_db.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_task_returns_false_when_missing(service, mock_db):
+    """测试删除不存在任务时返回False"""
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = mock_result
+    mock_db.delete = AsyncMock()
+
+    deleted = await service.delete_task("missing")
+
+    assert deleted is False
+    mock_db.delete.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_update_status_to_running(service, mock_db):
     """测试更新状态为running"""
     mock_task = MagicMock()
@@ -240,6 +271,31 @@ async def test_generate_analysts_sets_awaiting_feedback(service, mock_db):
     assert result["analysts"][0]["name"] == "A"
     service.update_task_status.assert_awaited_with("research_123", ResearchStatus.AWAITING_FEEDBACK)
     assert mock_task.analysts_config["analysts"][0]["name"] == "A"
+
+
+@pytest.mark.asyncio
+async def test_generate_analysts_uses_task_max_turns(service, mock_db):
+    """测试生成分析师时会把任务的最大访谈轮次写入图状态"""
+    mock_task = MagicMock()
+    mock_task.thread_id = "research_123"
+    mock_task.topic = "测试主题"
+    mock_task.max_analysts = 2
+    mock_task.max_turns = 6
+    mock_task.analysts_config = {}
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_task
+    mock_db.execute.return_value = mock_result
+    service._handle_graph_result = AsyncMock(
+        return_value={"status": "awaiting_feedback", "thread_id": "research_123", "analysts": []}
+    )
+
+    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
+        mock_graph.invoke.return_value = {"__interrupt__": []}
+
+        await service.generate_analysts("research_123")
+
+    initial_state = mock_graph.invoke.call_args.args[0]
+    assert initial_state["max_num_turns"] == 6
 
 
 def test_classify_event_create_analysts(service):

@@ -60,6 +60,16 @@ class DeepResearchService:
         )
         return list(result.scalars().all())
 
+    async def delete_task(self, thread_id: str) -> bool:
+        """删除任务记录"""
+        task = await self.get_task_by_thread_id(thread_id)
+        if not task:
+            return False
+
+        await self.db.delete(task)
+        await self.db.commit()
+        return True
+
     async def update_task_status(self, thread_id: str, status: ResearchStatus, final_report: str = None):
         """更新任务状态"""
         task = await self.get_task_by_thread_id(thread_id)
@@ -148,6 +158,7 @@ class DeepResearchService:
         initial_state = {
             "topic": task.topic,
             "max_analysts": task.max_analysts,
+            "max_num_turns": task.max_turns,
             "human_analyst_feedback": "",
         }
 
@@ -191,7 +202,13 @@ class DeepResearchService:
         handled = await self._handle_graph_result(thread_id, result)
         return handled
 
-    async def run_research_sync(self, thread_id: str, topic: str, max_analysts: int) -> Dict[str, Any]:
+    async def run_research_sync(
+        self,
+        thread_id: str,
+        topic: str,
+        max_analysts: int,
+        max_num_turns: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """同步运行研究工作流，直接返回完整结果（无流式输出）"""
         config = {"configurable": {"thread_id": thread_id}}
 
@@ -200,6 +217,7 @@ class DeepResearchService:
         initial_state = {
             "topic": topic,
             "max_analysts": max_analysts,
+            "max_num_turns": max_num_turns or self.config.max_turns,
             "human_analyst_feedback": "",
         }
 
@@ -225,7 +243,13 @@ class DeepResearchService:
                 "sections_count": 0,
             }
 
-    async def run_research(self, thread_id: str, topic: str, max_analysts: int) -> AsyncGenerator[Dict[str, Any], None]:
+    async def run_research(
+        self,
+        thread_id: str,
+        topic: str,
+        max_analysts: int,
+        max_num_turns: Optional[int] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """运行研究工作流（SSE流式版本，已废弃，请使用 run_research_sync）"""
         config = {"configurable": {"thread_id": thread_id}}
 
@@ -234,6 +258,7 @@ class DeepResearchService:
         initial_state = {
             "topic": topic,
             "max_analysts": max_analysts,
+            "max_num_turns": max_num_turns or self.config.max_turns,
             "human_analyst_feedback": "",
         }
 

@@ -19,6 +19,7 @@ def build_interview_subgraph():
     builder = StateGraph(InterviewState)
 
     builder.add_node("ask_question", generate_question)
+    builder.add_node("dispatch_search", lambda state: {})
     builder.add_node("search_web", search_web)
     builder.add_node("search_bocha", search_bocha)
     builder.add_node("answer_question", generate_answer)
@@ -26,8 +27,12 @@ def build_interview_subgraph():
     builder.add_node("write_section", write_section)
 
     builder.add_edge(START, "ask_question")
-    builder.add_edge("ask_question", "search_web")
-    builder.add_edge("ask_question", "search_bocha")
+    builder.add_edge("ask_question", "dispatch_search")
+    builder.add_conditional_edges(
+        "dispatch_search",
+        dispatch_searches,
+        ["search_web", "search_bocha"]
+    )
     builder.add_edge("search_web", "answer_question")
     builder.add_edge("search_bocha", "answer_question")
 
@@ -43,6 +48,14 @@ def build_interview_subgraph():
     return builder.compile()
 
 
+def dispatch_searches(state: Dict[str, Any]) -> List[Send]:
+    """将问题分发到两个并行搜索节点"""
+    return [
+        Send("search_web", dict(state)),
+        Send("search_bocha", dict(state)),
+    ]
+
+
 def initiate_all_interviews(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     """启动所有并行访谈 - Map步骤"""
     analysts = state.get("analysts")
@@ -52,11 +65,12 @@ def initiate_all_interviews(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     # 而不是循环回 create_analysts 导致无限循环
 
     topic = state["topic"]
+    max_num_turns = state.get("max_num_turns", 3)
     sends = [
         Send("conduct_interview", {
             "analyst": analyst,
             "messages": [HumanMessage(content=f"所以你说你在写一篇关于{topic}的文章?")],
-            "max_num_turns": 3,
+            "max_num_turns": max_num_turns,
         })
         for analyst in analysts
     ]
