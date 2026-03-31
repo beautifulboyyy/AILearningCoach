@@ -105,7 +105,8 @@ const formatTime = (value: string) => {
 <style scoped lang="scss">
 .rail-card {
   border: none;
-  height: 100%;
+  height: min(640px, calc(100vh - 250px));
+  min-height: 360px;
   background:
     radial-gradient(circle at top right, rgba(76, 141, 246, 0.08), transparent 28%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(250, 247, 240, 0.92) 100%);
@@ -116,14 +117,15 @@ const formatTime = (value: string) => {
   }
 
   :deep(.el-card__body) {
-    height: calc(100% - 73px);
+    height: calc(100% - 92px);
     padding-top: 16px;
   }
 }
 
 .rail-header {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
   justify-content: space-between;
   gap: 12px;
   color: #17324d;
@@ -139,8 +141,8 @@ const formatTime = (value: string) => {
 
 .rail-list {
   height: 100%;
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-height: 0;
   overflow-y: auto;
@@ -209,5 +211,16 @@ const formatTime = (value: string) => {
 .task-meta span {
   color: #72849a;
   font-size: 12px;
+}
+
+@media (max-width: 1080px) {
+  .rail-card {
+    height: auto;
+    min-height: 320px;
+  }
+
+  .rail-list {
+    max-height: 420px;
+  }
 }
 </style>

@@ -127,7 +127,7 @@
                 </div>
                 <div>
                   <span>任务线程</span>
-                  <strong>{{ store.currentTask.thread_id }}</strong>
+                  <strong class="thread-id">{{ store.currentTask.thread_id }}</strong>
                 </div>
               </div>
             </el-card>
@@ -292,9 +292,10 @@ onBeforeUnmount(() => {
   --ink-strong: #17324d;
   --ink-soft: #6f8096;
 
-  height: calc(100vh - 108px);
+  min-height: calc(100vh - 108px);
   display: grid;
   grid-template-columns: 360px minmax(0, 1fr);
+  align-items: start;
   gap: 20px;
   padding: 4px 0 8px;
   background:
@@ -303,27 +304,24 @@ onBeforeUnmount(() => {
 }
 
 .rail-column {
-  min-height: 0;
+  position: sticky;
+  top: 8px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
   gap: 16px;
 }
 
 .workspace-column {
   min-width: 0;
-  min-height: 0;
 }
 
 .workspace-stack {
-  height: 100%;
-  min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
   gap: 16px;
 }
 
 .detail-grid {
-  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) 320px;
   gap: 18px;
@@ -331,24 +329,9 @@ onBeforeUnmount(() => {
 
 .detail-main,
 .detail-side {
-  min-height: 0;
   display: grid;
   align-content: start;
   gap: 16px;
-}
-
-.detail-side {
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.detail-side::-webkit-scrollbar {
-  width: 8px;
-}
-
-.detail-side::-webkit-scrollbar-thumb {
-  background: rgba(76, 141, 246, 0.24);
-  border-radius: 999px;
 }
 
 .pending-card,
@@ -474,6 +457,12 @@ onBeforeUnmount(() => {
   gap: 4px;
 }
 
+.thread-id {
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
 .side-meta-list span {
   color: #70839a;
   font-size: 12px;
@@ -507,7 +496,10 @@ onBeforeUnmount(() => {
 @media (max-width: 1080px) {
   .deep-research-page {
     grid-template-columns: 1fr;
-    height: auto;
+  }
+
+  .rail-column {
+    position: static;
   }
 
   .pending-state {
