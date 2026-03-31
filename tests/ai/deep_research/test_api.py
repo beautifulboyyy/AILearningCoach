@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 
 from main import app
+from app.models.research_task import ResearchStatus
 
 
 @pytest.fixture
@@ -186,6 +187,30 @@ class TestDeepResearchAPI:
             )
 
             assert response.status_code == 409
+
+    def test_submit_feedback_accepts_enum_status_value(self, client):
+        """测试任务状态为枚举对象时也能正确识别等待反馈状态"""
+        with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
+            mock_instance = MagicMock()
+            mock_task = MagicMock()
+            mock_task.status = ResearchStatus.AWAITING_FEEDBACK
+            mock_instance.get_task_by_thread_id = AsyncMock(return_value=mock_task)
+            mock_instance.submit_feedback = AsyncMock(return_value={
+                "status": "completed",
+                "thread_id": "test-thread-123",
+                "message": "研究完成",
+                "final_report": "# 报告",
+                "sections_count": 2,
+                "error": "",
+            })
+            mock_service.return_value = mock_instance
+
+            response = client.post(
+                "/api/v1/deep-research/tasks/test-thread-123/feedback",
+                json={"action": "approve"}
+            )
+
+            assert response.status_code == 200
 
     def test_cancel_research(self, client):
         """测试删除研究任务"""

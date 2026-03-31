@@ -1,7 +1,12 @@
 """节点函数测试"""
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.ai.deep_research.nodes import finalize_report, route_messages
+from app.ai.deep_research.nodes import (
+    dedupe_sources,
+    finalize_report,
+    format_report_sources,
+    route_messages,
+)
 from app.ai.deep_research.state import GenerateAnalystsState
 
 
@@ -76,3 +81,75 @@ def test_finalize_report_strips_insights_and_keeps_sources():
     assert "主体内容" in result["final_report"]
     assert "## Insights" not in result["final_report"]
     assert "## Sources\n[1] https://example.com" in result["final_report"]
+
+
+def test_dedupe_sources_keeps_first_url_order():
+    """测试来源按 URL 去重并保留首次出现顺序"""
+    sources = [
+        {"url": "https://a.example.com", "title": "A1"},
+        {"url": "https://b.example.com", "title": "B"},
+        {"url": "https://a.example.com", "title": "A2"},
+        {"url": "", "title": "empty"},
+    ]
+
+    result = dedupe_sources(sources)
+
+    assert [item["url"] for item in result] == [
+        "https://a.example.com",
+        "https://b.example.com",
+    ]
+    assert result[0]["title"] == "A1"
+
+
+def test_format_report_sources_groups_urls_by_section():
+    """测试最终引用区会按小节组织 URL 引用"""
+    section_documents = [
+        {
+            "title": "Agent 架构",
+            "sources": [
+                {"url": "https://a.example.com", "title": "A"},
+                {"url": "https://b.example.com", "title": "B"},
+            ],
+        },
+        {
+            "title": "治理",
+            "sources": [
+                {"url": "https://b.example.com", "title": "B again"},
+                {"url": "https://c.example.com", "title": "C"},
+            ],
+        },
+    ]
+
+    markdown = format_report_sources(section_documents)
+
+    assert markdown.startswith("## 引用")
+    assert "### Agent 架构" in markdown
+    assert "### 治理" in markdown
+    assert "https://a.example.com" in markdown
+    assert "https://c.example.com" in markdown
+    assert markdown.count("https://b.example.com") == 1
+
+
+def test_finalize_report_prefers_structured_section_urls():
+    """测试最终报告会附加基于小节元信息生成的 URL 引用"""
+    state = {
+        "introduction": "## 引言\n引言内容",
+        "content": "## Insights\n主体内容\n## Sources\n[1] 旧的来源占位",
+        "conclusion": "## 结论\n结论内容",
+        "section_documents": [
+            {
+                "title": "Agent 架构",
+                "sources": [
+                    {"url": "https://a.example.com", "title": "A"},
+                    {"url": "https://b.example.com", "title": "B"},
+                ],
+            }
+        ],
+    }
+
+    result = finalize_report(state)
+
+    assert "主体内容" in result["final_report"]
+    assert "## 引用" in result["final_report"]
+    assert "https://a.example.com" in result["final_report"]
+    assert "旧的来源占位" not in result["final_report"]

@@ -41,6 +41,133 @@ class SearchQuery(BaseModel):
     search_query: str = Field(None, description="用于检索的搜索查询语句")
 
 
+def dedupe_sources(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """按 URL 去重并保留首次出现顺序。"""
+    deduped: List[Dict[str, Any]] = []
+    seen_urls: set[str] = set()
+
+    for source in sources or []:
+        url = (source or {}).get("url", "").strip()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        deduped.append(source)
+
+    return deduped
+
+
+def _coerce_text(value: Any) -> str:
+    """将任意值转为可安全拼接的字符串。"""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def normalize_tavily_results(raw_docs: Any, query: str) -> List[Dict[str, Any]]:
+    """将 Tavily 返回结果标准化为统一来源结构。"""
+    if isinstance(raw_docs, dict):
+        results = raw_docs.get("results") or raw_docs.get("items") or []
+    elif isinstance(raw_docs, list):
+        results = raw_docs
+    else:
+        results = []
+
+    normalized = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        normalized.append({
+            "source_type": "tavily",
+            "query": query,
+            "url": _coerce_text(item.get("url")),
+            "title": _coerce_text(item.get("title") or item.get("name")),
+            "snippet": _coerce_text(item.get("content") or item.get("snippet")),
+            "site_name": _coerce_text(item.get("source") or item.get("site_name")),
+        })
+
+    return dedupe_sources(normalized)
+
+
+def normalize_bocha_results(results: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+    """将 Bocha 返回结果标准化为统一来源结构。"""
+    normalized = []
+    for item in results or []:
+        if not isinstance(item, dict):
+            continue
+        normalized.append({
+            "source_type": "bocha",
+            "query": query,
+            "url": _coerce_text(item.get("url")),
+            "title": _coerce_text(item.get("name") or item.get("title")),
+            "snippet": _coerce_text(item.get("snippet")),
+            "site_name": _coerce_text(item.get("siteName") or item.get("site_name")),
+        })
+
+    return dedupe_sources(normalized)
+
+
+def format_sources_for_context(sources: List[Dict[str, Any]]) -> str:
+    """把结构化来源格式化成 LLM 可消费的上下文。"""
+    blocks = []
+    for idx, source in enumerate(dedupe_sources(sources), start=1):
+        title = source.get("title") or "Untitled"
+        url = source.get("url") or ""
+        site_name = source.get("site_name") or source.get("source_type") or ""
+        snippet = source.get("snippet") or ""
+        blocks.append(
+            f"[{idx}] {title}\nURL: {url}\nSite: {site_name}\nSummary: {snippet}"
+        )
+    return "\n\n".join(blocks)
+
+
+def extract_section_title(section_content: str) -> str:
+    """从 Markdown 小节中提取标题。"""
+    for line in (section_content or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("### "):
+            return stripped[4:].strip()
+        if stripped.startswith("## "):
+            return stripped[3:].strip()
+        if stripped.startswith("# "):
+            return stripped[2:].strip()
+    return "未命名小节"
+
+
+def format_report_sources(section_documents: List[Dict[str, Any]]) -> str:
+    """按小节组织最终 URL 引用区。"""
+    if not section_documents:
+        return ""
+
+    lines = ["## 引用"]
+    seen_urls: set[str] = set()
+
+    for section in section_documents:
+        title = _coerce_text((section or {}).get("title")) or "未命名小节"
+        section_sources = []
+        for source in (section or {}).get("sources", []):
+            url = _coerce_text((source or {}).get("url"))
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            section_sources.append(source)
+
+        if not section_sources:
+            continue
+
+        lines.append(f"### {title}")
+        for idx, source in enumerate(section_sources, start=1):
+            label = _coerce_text(source.get("title")) or _coerce_text(source.get("site_name")) or source.get("url")
+            lines.append(f"{idx}. {label}")
+            lines.append(f"   URL: {source.get('url')}")
+
+    if len(lines) == 1:
+        return ""
+
+    return "\n".join(lines)
+
+
 # ===== 节点函数 =====
 def create_analysts(state: Dict[str, Any]) -> Dict[str, Any]:
     """创建分析师团队"""
@@ -130,13 +257,14 @@ def search_web(state: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         docs = get_tavily_tool().invoke(query_str)
+        sources = normalize_tavily_results(docs, query_str)
     except Exception as e:
         print(f"[ERROR] search_web tavily failed: {e}")
-        docs = ""
+        sources = []
 
-    formatted = f'\n\n---\n\n{docs}\n\n---'
+    formatted = format_sources_for_context(sources)
 
-    return {"context": [formatted]}
+    return {"context": [formatted] if formatted else [], "sources": sources}
 
 
 def search_bocha(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -152,14 +280,15 @@ def search_bocha(state: Dict[str, Any]) -> Dict[str, Any]:
         query_str = ""
 
     try:
-        docs = bocha_tool._run(query=query_str, count=10)
+        docs = bocha_tool._search(query=query_str, count=10)
+        sources = normalize_bocha_results(docs, query_str)
     except Exception as e:
         print(f"[ERROR] search_bocha failed: {e}")
-        docs = ""
+        sources = []
 
-    formatted = f'\n\n---\n\n{docs}\n\n---'
+    formatted = format_sources_for_context(sources)
 
-    return {"context": [formatted]}
+    return {"context": [formatted] if formatted else [], "sources": sources}
 
 
 def generate_answer(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -218,19 +347,30 @@ def write_section(state: Dict[str, Any]) -> Dict[str, Any]:
     """撰写报告小节"""
     analyst = state["analyst"]
     context = state.get("context", [])
+    sources = dedupe_sources(state.get("sources", []))
 
     system_msg = section_writer_instructions.format(focus=analyst["description"])
 
     try:
         section = get_llm().invoke([
             SystemMessage(content=system_msg),
-            HumanMessage(content=f"使用这些来源撰写你的小节: {context}")
+            HumanMessage(content=f"使用这些来源撰写你的小节:\n\n{chr(10).join(context)}")
         ])
     except Exception as e:
         print(f"[ERROR] write_section failed: {e}")
         section = type('obj', (object,), {'content': ''})()
 
-    return {"sections": [section.content]}
+    section_content = section.content
+    section_document = {
+        "title": extract_section_title(section_content),
+        "content": section_content,
+        "sources": sources,
+    }
+
+    return {
+        "sections": [section_content],
+        "section_documents": [section_document],
+    }
 
 
 def write_report(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -326,7 +466,11 @@ def finalize_report(state: Dict[str, Any]) -> Dict[str, Any]:
         conclusion
     )
 
-    if sources:
+    structured_sources = format_report_sources(state.get("section_documents", []))
+
+    if structured_sources:
+        final_report += "\n\n" + structured_sources
+    elif sources:
         final_report += "\n\n## Sources\n" + sources
 
     return {"final_report": final_report}

@@ -79,10 +79,7 @@ section_writer_instructions = """你是一名资深技术写作者。
 - 使用数字引用（如 [1]、[2]）
 - 控制在约400字以内
 - 生成的小节内容必须全部使用中文
-
-参考格式：
-### Sources
-[1] 链接或文档名"""
+- 不要在小节末尾额外输出 Sources、References、参考文献 小节，系统会统一追加 URL 引用"""
 
 
 report_writer_instructions = """你是一名技术写作者，正在为如下主题撰写报告：
@@ -100,7 +97,7 @@ report_writer_instructions = """你是一名技术写作者，正在为如下主
 报告格式要求：
 1. 使用 Markdown 格式
 2. 报告以一个标题开头：## Insights
-3. 汇总最终来源列表，以 ## Sources 作为小节标题
+3. 不要额外生成 Sources、References、参考文献 小节，系统会统一追加 URL 引用
 4. 生成的报告必须全部使用中文"""
 
 

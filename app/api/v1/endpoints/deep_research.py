@@ -104,7 +104,8 @@ async def submit_feedback(
     task = await service.get_task_by_thread_id(thread_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    if str(task.status) != ResearchStatus.AWAITING_FEEDBACK.value:
+    current_status = getattr(task.status, "value", task.status)
+    if current_status != ResearchStatus.AWAITING_FEEDBACK.value:
         raise HTTPException(status_code=409, detail="任务当前不处于等待反馈状态")
 
     feedback = request.feedback if request.action == "regenerate" else None

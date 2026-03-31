@@ -18,6 +18,23 @@ class Analyst(TypedDict):
     description: str
 
 
+class SourceItem(TypedDict, total=False):
+    """结构化来源元信息"""
+    source_type: str
+    query: str
+    url: str
+    title: str
+    snippet: str
+    site_name: str
+
+
+class SectionDocument(TypedDict, total=False):
+    """按小节沉淀的报告与来源数据"""
+    title: str
+    content: str
+    sources: List[SourceItem]
+
+
 class GenerateAnalystsState(TypedDict):
     """分析师生成状态"""
     topic: str
@@ -31,9 +48,11 @@ class InterviewState(TypedDict):
     messages: Annotated[List[BaseMessage], operator.add]
     max_num_turns: int
     context: Annotated[list, operator.add]
+    sources: Annotated[List[SourceItem], operator.add]
     analyst: Analyst
     interview: str
     sections: list
+    section_documents: Annotated[List[SectionDocument], operator.add]
 
 
 class ResearchGraphState(TypedDict):
@@ -44,6 +63,7 @@ class ResearchGraphState(TypedDict):
     human_analyst_feedback: Optional[str]
     analysts: List[Analyst]
     sections: Annotated[list, operator.add]
+    section_documents: Annotated[List[SectionDocument], operator.add]
     introduction: str
     content: str
     conclusion: str
