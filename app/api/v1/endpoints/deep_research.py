@@ -1,9 +1,7 @@
 """Deep Research API端点"""
 from typing import List
-import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
@@ -141,55 +139,3 @@ async def cancel_research(
         raise HTTPException(status_code=404, detail="任务不存在")
 
     return {"status": "deleted"}
-
-
-@router.post("/tasks/{thread_id}/execute", response_model=TaskOperationResponse)
-async def execute_research(
-    thread_id: str,
-    db: AsyncSession = Depends(get_db)
-):
-    """兼容旧调用：直接执行任务，若未确认分析师则返回等待反馈状态"""
-    service = DeepResearchService(db)
-    task = await service.get_task_by_thread_id(thread_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-
-    result = await service.run_research_sync(
-        thread_id,
-        task.topic,
-        task.max_analysts,
-        task.max_turns,
-    )
-    return TaskOperationResponse(**result)
-
-
-@router.get("/{thread_id}/events")
-async def stream_research_events(
-    thread_id: str,
-    db: AsyncSession = Depends(get_db)
-):
-    """SSE流式事件（已废弃，请使用 POST /{thread_id}/execute）"""
-    service = DeepResearchService(db)
-
-    task = await service.get_task_by_thread_id(thread_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-
-    async def event_generator():
-        async for event in service.run_research(
-            thread_id,
-            task.topic,
-            task.max_analysts,
-            task.max_turns,
-        ):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )

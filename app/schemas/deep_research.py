@@ -74,9 +74,3 @@ class TaskProgressResponse(BaseModel):
     stage: str
     message: str = ""
     updated_at: str = ""
-
-
-class SSEResponse(BaseModel):
-    """SSE事件数据"""
-    event: str
-    data: dict

@@ -256,13 +256,14 @@ class TestDeepResearchAPI:
 
             assert response.status_code == 404
 
-    def test_stream_research_events_not_found(self, client):
-        """测试SSE流不存在任务"""
-        with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
-            mock_instance = MagicMock()
-            mock_instance.get_task_by_thread_id = AsyncMock(return_value=None)
-            mock_service.return_value = mock_instance
+    def test_execute_route_is_removed(self, client):
+        """测试旧 execute 兼容接口已移除"""
+        response = client.post("/api/v1/deep-research/tasks/test-thread-123/execute")
 
-            response = client.get("/api/v1/deep-research/nonexistent-thread/events")
+        assert response.status_code == 404
 
-            assert response.status_code == 404
+    def test_events_route_is_removed(self, client):
+        """测试旧 SSE events 接口已移除"""
+        response = client.get("/api/v1/deep-research/test-thread-123/events")
+
+        assert response.status_code == 404
