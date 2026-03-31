@@ -52,6 +52,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '任务管理' }
       },
       {
+        path: 'deep-research',
+        name: 'DeepResearch',
+        component: () => import('@/views/deep-research/DeepResearchWorkbench.vue'),
+        meta: { title: 'Deep Research' }
+      },
+      {
         path: 'progress',
         name: 'Progress',
         component: () => import('@/views/progress/ProgressView.vue'),

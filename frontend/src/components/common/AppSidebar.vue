@@ -38,6 +38,11 @@
         <el-icon><List /></el-icon>
         <template #title>任务管理</template>
       </el-menu-item>
+
+      <el-menu-item index="/deep-research">
+        <el-icon><Compass /></el-icon>
+        <template #title>Deep Research</template>
+      </el-menu-item>
       
       <el-menu-item index="/progress">
         <el-icon><DataAnalysis /></el-icon>
@@ -57,7 +62,7 @@ import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { 
   Reading, HomeFilled, ChatDotRound, TrendCharts, 
-  List, DataAnalysis, User 
+  List, DataAnalysis, User, Compass
 } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 
