@@ -23,6 +23,8 @@
     width="560px"
     align-center
     :close-on-click-modal="false"
+    :lock-scroll="true"
+    append-to-body
     destroy-on-close
     class="composer-dialog"
   >
@@ -101,7 +103,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onBeforeUnmount, reactive, ref, watch } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import type { StartDeepResearchRequest } from '@/types/deepResearch'
 
@@ -133,6 +135,19 @@ const rules: FormRules<typeof form> = {
   ],
   max_analysts: [{ required: true, message: '请选择分析师数量', trigger: 'change' }]
 }
+
+const toggleBodyScroll = (locked: boolean) => {
+  if (typeof document === 'undefined') return
+  document.body.style.overflow = locked ? 'hidden' : ''
+}
+
+watch(dialogVisible, (visible) => {
+  toggleBodyScroll(visible)
+})
+
+onBeforeUnmount(() => {
+  toggleBodyScroll(false)
+})
 
 const resetForm = () => {
   form.topic = ''
@@ -247,8 +262,7 @@ const handleSubmit = async () => {
 }
 
 .composer-dialog :deep(.el-overlay) {
-  background: rgba(15, 27, 43, 0.46);
-  backdrop-filter: blur(8px);
+  background: rgba(12, 22, 35, 0.78);
 }
 
 .composer-dialog :deep(.el-dialog__header) {
