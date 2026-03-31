@@ -17,6 +17,8 @@ from app.ai.deep_research.tools.bocha import BochaSearchTool
 
 
 bocha_tool = BochaSearchTool()
+MAX_SOURCES_PER_SECTION = 3
+MAX_TOTAL_SOURCES = 8
 
 
 # ===== Pydantic 模型 =====
@@ -144,6 +146,7 @@ def format_report_sources(section_documents: List[Dict[str, Any]]) -> str:
 
     lines = ["## 引用"]
     seen_urls: set[str] = set()
+    total_kept = 0
 
     for section in section_documents:
         title = _coerce_text((section or {}).get("title")) or "未命名小节"
@@ -152,8 +155,13 @@ def format_report_sources(section_documents: List[Dict[str, Any]]) -> str:
             url = _coerce_text((source or {}).get("url"))
             if not url or url in seen_urls:
                 continue
+            if len(section_sources) >= MAX_SOURCES_PER_SECTION:
+                continue
+            if total_kept >= MAX_TOTAL_SOURCES:
+                break
             seen_urls.add(url)
             section_sources.append(source)
+            total_kept += 1
 
         if not section_sources:
             continue
@@ -168,6 +176,28 @@ def format_report_sources(section_documents: List[Dict[str, Any]]) -> str:
         return ""
 
     return "\n".join(lines)
+
+
+def ensure_markdown_heading(content: str, heading: str) -> str:
+    """确保内容以指定 Markdown 标题开头。"""
+    stripped = (content or "").strip()
+    if not stripped:
+        return heading
+    if stripped.startswith(heading):
+        return stripped
+    return f"{heading}\n{stripped}"
+
+
+def ensure_main_body_heading(content: str) -> str:
+    """确保主体内容使用统一标题。"""
+    stripped = (content or "").strip()
+    if not stripped:
+        return "## 主体内容"
+    if stripped.startswith("## Insights"):
+        stripped = stripped[len("## Insights"):].strip()
+    if stripped.startswith("## 主体内容"):
+        return stripped
+    return f"## 主体内容\n{stripped}"
 
 
 def _report_progress(config: RunnableConfig | None, stage: str, message: str) -> None:
@@ -377,7 +407,10 @@ def write_section(state: Dict[str, Any], config: RunnableConfig | None = None) -
         print(f"[ERROR] write_section failed: {e}")
         section = type('obj', (object,), {'content': ''})()
 
-    section_content = section.content
+    section_content = section.content.strip()
+    if not section_content.startswith("## "):
+        section_title = analyst["description"][:28] or "研究小节"
+        section_content = f"## {section_title}\n{section_content}"
     section_document = {
         "title": extract_section_title(section_content),
         "content": section_content,
@@ -408,7 +441,7 @@ def write_report(state: Dict[str, Any], config: RunnableConfig | None = None) ->
         print(f"[ERROR] write_report failed: {e}")
         report = type('obj', (object,), {'content': ''})()
 
-    return {"content": report.content}
+    return {"content": ensure_main_body_heading(report.content)}
 
 
 def write_introduction(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
@@ -432,7 +465,7 @@ def write_introduction(state: Dict[str, Any], config: RunnableConfig | None = No
         print(f"[ERROR] write_introduction failed: {e}")
         intro = type('obj', (object,), {'content': ''})()
 
-    return {"introduction": intro.content}
+    return {"introduction": ensure_markdown_heading(intro.content, "## 引言")}
 
 
 def write_conclusion(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
@@ -456,17 +489,13 @@ def write_conclusion(state: Dict[str, Any], config: RunnableConfig | None = None
         print(f"[ERROR] write_conclusion failed: {e}")
         conclusion = type('obj', (object,), {'content': ''})()
 
-    return {"conclusion": conclusion.content}
+    return {"conclusion": ensure_markdown_heading(conclusion.content, "## 结论")}
 
 
 def finalize_report(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """整合最终报告"""
     _report_progress(config, "finalizing_report", "正在整合最终报告")
     content = state.get("content", "")
-
-    # Handle content that starts with "## Insights"
-    if content.startswith("## Insights"):
-        content = content[len("## Insights"):].strip()
 
     if "## Sources" in content:
         try:
@@ -479,12 +508,12 @@ def finalize_report(state: Dict[str, Any], config: RunnableConfig | None = None)
     introduction = state.get("introduction", "")
     conclusion = state.get("conclusion", "")
 
-    final_report = (
-        introduction +
-        "\n\n---\n\n" +
-        content +
-        "\n\n---\n\n" +
-        conclusion
+    introduction = introduction.strip()
+    content = ensure_main_body_heading(content)
+    conclusion = ensure_markdown_heading(conclusion, "## 结论")
+
+    final_report = "\n\n".join(
+        part for part in [introduction, content, conclusion] if (part or "").strip()
     )
 
     structured_sources = format_report_sources(state.get("section_documents", []))
