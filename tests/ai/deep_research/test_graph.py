@@ -1,6 +1,5 @@
 """图构建测试"""
 import pytest
-import uuid
 from langgraph.types import Command
 from langgraph.types import Send
 
@@ -71,15 +70,15 @@ def test_dispatch_interviews_keeps_required_fields():
     assert result["analysts"][0]["name"] == "A"
 
 
-def test_research_graph_can_resume_after_rebuild_with_persistent_checkpointer():
-    """测试重建图实例后仍可从持久化 checkpoint 恢复中断流程"""
-    thread_id = f"graph-persist-{uuid.uuid4().hex[:8]}"
+def test_research_graph_can_resume_within_same_process():
+    """测试在同一进程内可继续中断后的研究流程"""
+    thread_id = "graph-memory-resume"
     config = {"configurable": {"thread_id": thread_id}}
 
-    first_graph = build_research_graph()
-    first_result = first_graph.invoke(
+    graph = build_research_graph()
+    first_result = graph.invoke(
         {
-            "topic": "测试持久化恢复",
+            "topic": "测试进程内恢复",
             "max_analysts": 1,
             "max_num_turns": 1,
             "human_analyst_feedback": "",
@@ -89,8 +88,7 @@ def test_research_graph_can_resume_after_rebuild_with_persistent_checkpointer():
 
     assert "__interrupt__" in first_result
 
-    rebuilt_graph = build_research_graph()
-    final_result = rebuilt_graph.invoke(
+    final_result = graph.invoke(
         Command(resume={"action": "approve"}),
         config,
     )

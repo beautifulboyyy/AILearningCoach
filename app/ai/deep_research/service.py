@@ -13,6 +13,11 @@ from app.models.research_task import ResearchTask, ResearchStatus
 from app.schemas.deep_research import StartResearchRequest
 from app.ai.deep_research.graph_builder import research_graph
 from app.ai.deep_research.config import get_config
+from app.ai.deep_research.progress import (
+    clear_progress as clear_runtime_progress,
+    get_progress as get_runtime_progress,
+    update_progress as update_runtime_progress,
+)
 
 
 class DeepResearchService:
@@ -21,6 +26,26 @@ class DeepResearchService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.config = get_config()
+
+    def get_progress(self, thread_id: str) -> Dict[str, str]:
+        """获取任务运行时进度。"""
+        return get_runtime_progress(thread_id)
+
+    def update_progress(self, thread_id: str, stage: str, message: str) -> Dict[str, str]:
+        """更新任务运行时进度。"""
+        return update_runtime_progress(thread_id, stage, message)
+
+    def clear_progress(self, thread_id: str):
+        """清理任务运行时进度。"""
+        clear_runtime_progress(thread_id)
+
+    async def _invoke_graph_in_executor(self, graph_input: Any, config: Dict[str, Any]) -> Dict[str, Any]:
+        """在线程池中执行阻塞式 graph.invoke，便于并发查询进度。"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: research_graph.invoke(graph_input, config),
+        )
 
     async def create_task(self, request: StartResearchRequest) -> ResearchTask:
         """创建新研究任务"""
@@ -68,6 +93,7 @@ class DeepResearchService:
 
         await self.db.delete(task)
         await self.db.commit()
+        self.clear_progress(thread_id)
         return True
 
     async def update_task_status(self, thread_id: str, status: ResearchStatus, final_report: str = None):
@@ -94,6 +120,7 @@ class DeepResearchService:
         """统一处理图执行结果"""
         if not result:
             await self.update_task_status(thread_id, ResearchStatus.FAILED)
+            self.clear_progress(thread_id)
             return {
                 "status": "failed",
                 "thread_id": thread_id,
@@ -110,6 +137,7 @@ class DeepResearchService:
             if task:
                 self._store_analysts(task, analysts)
                 await self.update_task_status(thread_id, ResearchStatus.AWAITING_FEEDBACK)
+            self.update_progress(thread_id, "awaiting_feedback", "请确认分析师或提供新的自然语言要求")
             return {
                 "status": "awaiting_feedback",
                 "thread_id": thread_id,
@@ -125,6 +153,7 @@ class DeepResearchService:
 
         if not final_report.strip():
             await self.update_task_status(thread_id, ResearchStatus.FAILED)
+            self.clear_progress(thread_id)
             return {
                 "status": "failed",
                 "thread_id": thread_id,
@@ -139,6 +168,7 @@ class DeepResearchService:
             ResearchStatus.COMPLETED,
             final_report=final_report,
         )
+        self.clear_progress(thread_id)
         return {
             "status": "completed",
             "thread_id": thread_id,
@@ -162,6 +192,7 @@ class DeepResearchService:
             "human_analyst_feedback": "",
         }
 
+        self.update_progress(thread_id, "creating_analysts", "正在生成分析师")
         result = research_graph.invoke(initial_state, config)
         handled = await self._handle_graph_result(thread_id, result)
         return {
@@ -179,6 +210,7 @@ class DeepResearchService:
             raise ValueError("任务不存在")
 
         if feedback:
+            self.update_progress(thread_id, "creating_analysts", "正在根据反馈重新生成分析师")
             result = research_graph.invoke(
                 Command(resume={"action": "regenerate", "feedback": feedback}),
                 config,
@@ -195,7 +227,8 @@ class DeepResearchService:
             }
 
         await self.update_task_status(thread_id, ResearchStatus.RUNNING)
-        result = research_graph.invoke(
+        self.update_progress(thread_id, "running", "正在开始研究")
+        result = await self._invoke_graph_in_executor(
             Command(resume={"action": "approve"}),
             config,
         )
@@ -221,19 +254,14 @@ class DeepResearchService:
             "human_analyst_feedback": "",
         }
 
-        def _invoke_graph():
-            """在同步线程中执行 graph.invoke()"""
-            result = research_graph.invoke(initial_state, config)
-            return result
-
         try:
-            # 在线程池中执行同步的 graph.invoke()
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, _invoke_graph)
+            self.update_progress(thread_id, "creating_analysts", "正在生成分析师")
+            result = await self._invoke_graph_in_executor(initial_state, config)
             return await self._handle_graph_result(thread_id, result)
 
         except Exception as e:
             await self.update_task_status(thread_id, ResearchStatus.FAILED)
+            self.clear_progress(thread_id)
             return {
                 "status": "failed",
                 "thread_id": thread_id,
@@ -268,9 +296,12 @@ class DeepResearchService:
                 config,
                 stream_mode="values"
             ):
+                progress = self._classify_event(event)
+                if progress:
+                    self.update_progress(thread_id, progress["stage"], progress["message"])
                 event_type = self._classify_event(event)
                 if event_type:
-                    yield event_type
+                    yield {"type": "status", "data": {"message": event_type["message"], "stage": event_type["stage"]}}
 
         except Exception as e:
             await self.update_task_status(thread_id, ResearchStatus.FAILED)
@@ -284,11 +315,12 @@ class DeepResearchService:
             ResearchStatus.COMPLETED,
             final_report=final_report
         )
+        self.clear_progress(thread_id)
 
         yield {"type": "done", "data": {"final_report": final_report}}
 
-    def _classify_event(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """分类事件类型"""
+    def _classify_event(self, event: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """将 LangGraph 事件映射为前端可展示的运行阶段。"""
         event_name = event.get("name") or ""
         event_type = event.get("event") or ""
 
@@ -297,14 +329,20 @@ class DeepResearchService:
             return None  # 忽略最终输出事件
 
         if "create_analysts" in event_name:
-            return {"type": "status", "data": {"message": "正在生成分析师..."}}
+            return {"stage": "creating_analysts", "message": "正在生成分析师"}
+        if event_name in {"search_web", "search_bocha", "dispatch_search"}:
+            return {"stage": "searching", "message": "正在并行检索 Tavily 和 Bocha"}
         if event_name == "conduct_interview":
-            return {"type": "status", "data": {"message": "正在访谈分析师..."}}
+            return {"stage": "interviewing", "message": "正在分析师讨论中"}
+        if event_name == "write_section":
+            return {"stage": "writing_sections", "message": "正在整理访谈并撰写小节"}
         if event_name == "write_report":
-            return {"type": "status", "data": {"message": "正在撰写报告..."}}
+            return {"stage": "writing_report", "message": "正在撰写报告"}
+        if event_name in {"write_introduction", "write_conclusion", "finalize_report"}:
+            return {"stage": "finalizing_report", "message": "正在整合最终报告"}
 
         # 通用状态事件
         if event_type == "on_chain_start":
-            return {"type": "status", "data": {"message": f"执行节点: {event_name}"}}
+            return {"stage": "running", "message": f"执行节点: {event_name}"}
 
         return None

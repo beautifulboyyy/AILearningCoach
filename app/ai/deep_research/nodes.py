@@ -2,9 +2,11 @@
 from typing import Dict, Any, List, Literal
 from pydantic import BaseModel, Field
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, get_buffer_string
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, interrupt
 
 from app.ai.deep_research.llm import get_llm
+from app.ai.deep_research.progress import update_progress
 from app.ai.deep_research.prompts import (
     analyst_instructions, question_instructions, answer_instructions,
     section_writer_instructions, report_writer_instructions,
@@ -168,9 +170,17 @@ def format_report_sources(section_documents: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _report_progress(config: RunnableConfig | None, stage: str, message: str) -> None:
+    """在节点运行时上报当前阶段。"""
+    thread_id = ((config or {}).get("configurable") or {}).get("thread_id")
+    if thread_id:
+        update_progress(thread_id, stage, message)
+
+
 # ===== 节点函数 =====
-def create_analysts(state: Dict[str, Any]) -> Dict[str, Any]:
+def create_analysts(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """创建分析师团队"""
+    _report_progress(config, "creating_analysts", "正在生成分析师")
     topic = state["topic"]
     max_analysts = state["max_analysts"]
     human_feedback = state.get("human_analyst_feedback", "")
@@ -200,8 +210,9 @@ def create_analysts(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"analysts": [a.model_dump() if hasattr(a, 'model_dump') else a for a in analysts]}
 
 
-def human_feedback(state: Dict[str, Any]) -> Command[Literal["create_analysts", "dispatch_interviews"]]:
+def human_feedback(state: Dict[str, Any], config: RunnableConfig | None = None) -> Command[Literal["create_analysts", "dispatch_interviews"]]:
     """在分析师生成后暂停，等待用户确认或要求重新生成"""
+    _report_progress(config, "awaiting_feedback", "请确认分析师或提供新的自然语言要求")
     response = interrupt(
         {
             "type": "analyst_review",
@@ -225,8 +236,9 @@ def human_feedback(state: Dict[str, Any]) -> Command[Literal["create_analysts", 
     )
 
 
-def generate_question(state: Dict[str, Any]) -> Dict[str, Any]:
+def generate_question(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """生成访谈问题"""
+    _report_progress(config, "interviewing", "正在分析师讨论中")
     analyst = state["analyst"]
     messages = state["messages"]
 
@@ -243,8 +255,9 @@ def generate_question(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"messages": [question]}
 
 
-def search_web(state: Dict[str, Any]) -> Dict[str, Any]:
+def search_web(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """Tavily Web搜索"""
+    _report_progress(config, "searching", "正在并行检索 Tavily 和 Bocha")
     messages = state["messages"]
 
     try:
@@ -267,8 +280,9 @@ def search_web(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"context": [formatted] if formatted else [], "sources": sources}
 
 
-def search_bocha(state: Dict[str, Any]) -> Dict[str, Any]:
+def search_bocha(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """Bocha Web搜索"""
+    _report_progress(config, "searching", "正在并行检索 Tavily 和 Bocha")
     messages = state["messages"]
 
     try:
@@ -291,8 +305,9 @@ def search_bocha(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"context": [formatted] if formatted else [], "sources": sources}
 
 
-def generate_answer(state: Dict[str, Any]) -> Dict[str, Any]:
+def generate_answer(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """生成专家回答"""
+    _report_progress(config, "interviewing", "正在分析师讨论中")
     analyst = state["analyst"]
     messages = state["messages"]
     context = state.get("context", [])
@@ -336,15 +351,17 @@ def route_messages(state: Dict[str, Any]) -> str:
     return "ask_question"
 
 
-def save_interview(state: Dict[str, Any]) -> Dict[str, Any]:
+def save_interview(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """保存访谈"""
+    _report_progress(config, "writing_sections", "正在整理访谈并撰写小节")
     messages = state["messages"]
     interview = get_buffer_string(messages)
     return {"interview": interview}
 
 
-def write_section(state: Dict[str, Any]) -> Dict[str, Any]:
+def write_section(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """撰写报告小节"""
+    _report_progress(config, "writing_sections", "正在整理访谈并撰写小节")
     analyst = state["analyst"]
     context = state.get("context", [])
     sources = dedupe_sources(state.get("sources", []))
@@ -373,8 +390,9 @@ def write_section(state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def write_report(state: Dict[str, Any]) -> Dict[str, Any]:
+def write_report(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """撰写报告主体"""
+    _report_progress(config, "writing_report", "正在撰写报告")
     sections = state.get("sections", [])
     topic = state.get("topic", "")
 
@@ -393,8 +411,9 @@ def write_report(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"content": report.content}
 
 
-def write_introduction(state: Dict[str, Any]) -> Dict[str, Any]:
+def write_introduction(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """撰写引言"""
+    _report_progress(config, "finalizing_report", "正在整合最终报告")
     sections = state.get("sections", [])
     topic = state.get("topic", "")
 
@@ -416,8 +435,9 @@ def write_introduction(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"introduction": intro.content}
 
 
-def write_conclusion(state: Dict[str, Any]) -> Dict[str, Any]:
+def write_conclusion(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """撰写结论"""
+    _report_progress(config, "finalizing_report", "正在整合最终报告")
     sections = state.get("sections", [])
     topic = state.get("topic", "")
 
@@ -439,8 +459,9 @@ def write_conclusion(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"conclusion": conclusion.content}
 
 
-def finalize_report(state: Dict[str, Any]) -> Dict[str, Any]:
+def finalize_report(state: Dict[str, Any], config: RunnableConfig | None = None) -> Dict[str, Any]:
     """整合最终报告"""
+    _report_progress(config, "finalizing_report", "正在整合最终报告")
     content = state.get("content", "")
 
     # Handle content that starts with "## Insights"

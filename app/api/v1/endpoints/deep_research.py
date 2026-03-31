@@ -14,6 +14,7 @@ from app.schemas.deep_research import (
     HumanFeedbackRequest,
     GenerateAnalystsResponse,
     TaskOperationResponse,
+    TaskProgressResponse,
 )
 from app.ai.deep_research.service import DeepResearchService
 
@@ -74,6 +75,21 @@ async def get_research_task(
         raise HTTPException(status_code=404, detail="任务不存在")
 
     return _task_to_response(task)
+
+
+@router.get("/tasks/{thread_id}/progress", response_model=TaskProgressResponse)
+async def get_research_progress(
+    thread_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取任务运行时进度，不做长期持久化。"""
+    service = DeepResearchService(db)
+    task = await service.get_task_by_thread_id(thread_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    return TaskProgressResponse(**service.get_progress(thread_id))
 
 
 @router.post("/tasks/{thread_id}/analysts", response_model=GenerateAnalystsResponse)

@@ -1,43 +1,17 @@
 """Deep Research 图构建"""
-import atexit
 from typing import Dict, Any, List
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Send
 
 from langchain_core.messages import HumanMessage
 
-from app.core.config import settings
 from app.ai.deep_research.state import InterviewState, ResearchGraphState
 from app.ai.deep_research.nodes import (
     create_analysts, human_feedback, generate_question, search_web, search_bocha,
     generate_answer, route_messages, save_interview, write_section,
     write_report, write_introduction, write_conclusion, finalize_report
 )
-
-
-_checkpointer_cm = None
-_checkpointer = None
-
-
-def _close_checkpointer():
-    """关闭全局 Postgres checkpointer 连接。"""
-    global _checkpointer_cm, _checkpointer
-    if _checkpointer_cm is not None:
-        _checkpointer_cm.__exit__(None, None, None)
-        _checkpointer_cm = None
-        _checkpointer = None
-
-
-def get_checkpointer() -> PostgresSaver:
-    """获取可跨进程恢复的 LangGraph 持久化 checkpointer。"""
-    global _checkpointer_cm, _checkpointer
-    if _checkpointer is None:
-        _checkpointer_cm = PostgresSaver.from_conn_string(settings.DATABASE_SYNC_URL)
-        _checkpointer = _checkpointer_cm.__enter__()
-        _checkpointer.setup()
-        atexit.register(_close_checkpointer)
-    return _checkpointer
 
 
 def build_interview_subgraph():
@@ -147,7 +121,7 @@ def build_research_graph():
     builder.add_edge("finalize_report", END)
 
     return builder.compile(
-        checkpointer=get_checkpointer()
+        checkpointer=MemorySaver()
     )
 
 

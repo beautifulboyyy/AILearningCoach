@@ -34,6 +34,29 @@ def service(mock_db, mock_config):
     return svc
 
 
+def test_progress_defaults_to_idle_when_missing(service):
+    """测试未写入进度时返回 idle 占位"""
+    progress = service.get_progress("research_123")
+
+    assert progress["thread_id"] == "research_123"
+    assert progress["stage"] == "idle"
+    assert progress["message"] == ""
+
+
+def test_progress_can_be_updated_and_cleared(service):
+    """测试运行时进度可更新且可清空"""
+    service.update_progress("research_123", "searching", "正在并行检索 Tavily 和 Bocha")
+
+    progress = service.get_progress("research_123")
+    assert progress["stage"] == "searching"
+    assert "Tavily" in progress["message"]
+
+    service.clear_progress("research_123")
+
+    cleared = service.get_progress("research_123")
+    assert cleared["stage"] == "idle"
+
+
 @pytest.mark.asyncio
 async def test_create_task_generates_thread_id(service, mock_db):
     """测试创建任务生成thread_id"""
@@ -231,12 +254,13 @@ async def test_submit_feedback_empty_continues(service, mock_db):
 
     service._handle_graph_result = AsyncMock(return_value={"status": "completed", "thread_id": "research_123"})
 
-    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
-        mock_graph.invoke.return_value = {"final_report": "# 报告", "sections": ["A"]}
+    service._invoke_graph_in_executor = AsyncMock(return_value={"final_report": "# 报告", "sections": ["A"]})
+
+    with patch("app.ai.deep_research.service.research_graph"):
         result = await service.submit_feedback("research_123", None)
 
     assert result["status"] == "completed"
-    command = mock_graph.invoke.call_args.args[0]
+    command = service._invoke_graph_in_executor.await_args.args[0]
     assert command.resume["action"] == "approve"
     service._handle_graph_result.assert_awaited()
 
@@ -309,8 +333,8 @@ def test_classify_event_create_analysts(service):
 
     result = service._classify_event(event)
 
-    assert result["type"] == "status"
-    assert "分析师" in result["data"]["message"]
+    assert result["stage"] == "creating_analysts"
+    assert "分析师" in result["message"]
 
 
 def test_classify_event_unknown(service):
@@ -327,9 +351,9 @@ async def test_run_research_sync_marks_failed_when_graph_returns_empty(service):
     """测试 graph 返回空结果时任务会标记为失败"""
     service.update_task_status = AsyncMock()
 
-    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
-        mock_graph.invoke.return_value = {}
+    service._invoke_graph_in_executor = AsyncMock(return_value={})
 
+    with patch("app.ai.deep_research.service.research_graph"):
         result = await service.run_research_sync("research_123", "测试主题", 2)
 
     assert result["status"] == "failed"
@@ -343,12 +367,12 @@ async def test_run_research_sync_marks_completed_with_report(service):
     """测试 graph 成功返回时任务会写入完成状态和报告"""
     service.update_task_status = AsyncMock()
 
-    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
-        mock_graph.invoke.return_value = {
-            "final_report": "# 报告",
-            "sections": ["A", "B"],
-        }
+    service._invoke_graph_in_executor = AsyncMock(return_value={
+        "final_report": "# 报告",
+        "sections": ["A", "B"],
+    })
 
+    with patch("app.ai.deep_research.service.research_graph"):
         result = await service.run_research_sync("research_123", "测试主题", 2)
 
     assert result == {
@@ -369,9 +393,9 @@ async def test_run_research_sync_marks_failed_when_graph_raises(service):
     """测试 graph 抛错时任务会返回失败结果"""
     service.update_task_status = AsyncMock()
 
-    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
-        mock_graph.invoke.side_effect = RuntimeError("boom")
+    service._invoke_graph_in_executor = AsyncMock(side_effect=RuntimeError("boom"))
 
+    with patch("app.ai.deep_research.service.research_graph"):
         result = await service.run_research_sync("research_123", "测试主题", 2)
 
     assert result["status"] == "failed"
@@ -385,12 +409,12 @@ async def test_run_research_sync_marks_failed_when_final_report_empty(service):
     """测试 graph 返回空报告时不会误标记为完成"""
     service.update_task_status = AsyncMock()
 
-    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
-        mock_graph.invoke.return_value = {
-            "final_report": "",
-            "sections": ["只有小节，没有最终报告"],
-        }
+    service._invoke_graph_in_executor = AsyncMock(return_value={
+        "final_report": "",
+        "sections": ["只有小节，没有最终报告"],
+    })
 
+    with patch("app.ai.deep_research.service.research_graph"):
         result = await service.run_research_sync("research_123", "测试主题", 2)
 
     assert result["status"] == "failed"

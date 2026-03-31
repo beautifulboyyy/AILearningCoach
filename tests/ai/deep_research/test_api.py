@@ -121,6 +121,27 @@ class TestDeepResearchAPI:
 
             assert response.status_code == 404
 
+    def test_get_research_progress(self, client):
+        """测试获取任务运行时进度"""
+        with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
+            mock_instance = MagicMock()
+            mock_task = MagicMock()
+            mock_instance.get_task_by_thread_id = AsyncMock(return_value=mock_task)
+            mock_instance.get_progress = MagicMock(return_value={
+                "thread_id": "test-thread-123",
+                "stage": "searching",
+                "message": "正在并行检索 Tavily 和 Bocha",
+                "updated_at": "2026-03-31T14:30:00",
+            })
+            mock_service.return_value = mock_instance
+
+            response = client.get("/api/v1/deep-research/tasks/test-thread-123/progress")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["stage"] == "searching"
+            assert "Bocha" in data["message"]
+
     def test_generate_analysts(self, client):
         """测试生成分析师流程"""
         with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:

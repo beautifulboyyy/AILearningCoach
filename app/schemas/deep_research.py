@@ -68,6 +68,14 @@ class TaskOperationResponse(BaseModel):
     error: str = ""
 
 
+class TaskProgressResponse(BaseModel):
+    """任务运行时进度响应"""
+    thread_id: str
+    stage: str
+    message: str = ""
+    updated_at: str = ""
+
+
 class SSEResponse(BaseModel):
     """SSE事件数据"""
     event: str
