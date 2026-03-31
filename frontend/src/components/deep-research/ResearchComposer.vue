@@ -20,8 +20,9 @@
 
   <el-dialog
     v-model="dialogVisible"
-    width="640px"
-    top="8vh"
+    width="560px"
+    align-center
+    :close-on-click-modal="false"
     destroy-on-close
     class="composer-dialog"
   >
@@ -29,19 +30,12 @@
       <div class="dialog-header">
         <div>
           <h3>创建 Deep Research 任务</h3>
-          <p>先定义主题与分析师规模，创建后再进入分析师确认和正式研究流程。</p>
+          <p>先定义主题和分析师规模，再进入分析师确认与正式研究流程。</p>
         </div>
       </div>
     </template>
 
     <div class="dialog-body">
-      <div class="dialog-note">
-        <div>
-          <span>创建后流程</span>
-          <strong>生成分析师 -> 人工确认 -> 并行研究 -> 最终报告</strong>
-        </div>
-      </div>
-
       <el-form
         ref="formRef"
         :model="form"
@@ -74,7 +68,7 @@
 
           <div class="count-hint">
             <span>建议范围</span>
-            <p>2 到 4 位最适合多数主题，既能覆盖不同视角，也不会让研究过于发散。</p>
+            <p>建议使用 2 到 4 位分析师，覆盖视角更平衡。</p>
           </div>
         </div>
 
@@ -239,70 +233,64 @@ const handleSubmit = async () => {
 }
 
 .composer-dialog :deep(.el-dialog) {
-  border-radius: 24px;
+  border-radius: 22px;
   overflow: hidden;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
-  box-shadow: 0 28px 80px rgba(20, 44, 70, 0.2);
+  background: #ffffff;
+  box-shadow: 0 28px 80px rgba(20, 44, 70, 0.24);
+}
+
+.composer-dialog :deep(.el-overlay-dialog) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.composer-dialog :deep(.el-overlay) {
+  background: rgba(15, 27, 43, 0.46);
+  backdrop-filter: blur(8px);
 }
 
 .composer-dialog :deep(.el-dialog__header) {
-  padding: 24px 28px 0;
+  padding: 22px 24px 0;
 }
 
 .composer-dialog :deep(.el-dialog__body) {
-  padding: 18px 28px 8px;
+  padding: 14px 24px 8px;
 }
 
 .composer-dialog :deep(.el-dialog__footer) {
-  padding: 0 28px 24px;
+  padding: 0 24px 22px;
+}
+
+.composer-dialog :deep(.el-dialog__headerbtn) {
+  top: 18px;
+  right: 18px;
 }
 
 .dialog-header h3 {
   margin: 0;
   color: #17324d;
-  font-size: 30px;
-  line-height: 1.15;
+  font-size: 26px;
+  line-height: 1.18;
 }
 
 .dialog-header p {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: #6f8096;
-  line-height: 1.7;
+  line-height: 1.6;
+  font-size: 14px;
 }
 
 .dialog-body {
   display: grid;
-  gap: 22px;
-}
-
-.dialog-note {
-  border: 1px solid rgba(76, 141, 246, 0.12);
-  border-radius: 18px;
-  padding: 16px 18px;
-  background:
-    radial-gradient(circle at top right, rgba(76, 141, 246, 0.12), transparent 30%),
-    linear-gradient(180deg, rgba(247, 249, 253, 0.98) 0%, rgba(255, 251, 243, 0.96) 100%);
-
-  span {
-    display: block;
-    margin-bottom: 6px;
-    color: #70839a;
-    font-size: 12px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-
-  strong {
-    color: #17324d;
-    font-size: 15px;
-    line-height: 1.7;
-  }
+  gap: 14px;
 }
 
 .form-row {
   display: grid;
   grid-template-columns: 180px minmax(0, 1fr);
-  gap: 18px;
+  gap: 14px;
   align-items: start;
 }
 
@@ -311,14 +299,14 @@ const handleSubmit = async () => {
 }
 
 .count-hint {
-  padding: 14px 16px;
+  padding: 12px 14px;
   border-radius: 16px;
   background: rgba(245, 248, 252, 0.92);
   border: 1px solid rgba(22, 49, 76, 0.08);
 
   span {
     display: block;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     color: #70839a;
     font-size: 12px;
     text-transform: uppercase;
@@ -328,9 +316,23 @@ const handleSubmit = async () => {
   p {
     margin: 0;
     color: #43617f;
-    line-height: 1.7;
-    font-size: 14px;
+    line-height: 1.6;
+    font-size: 13px;
   }
+}
+
+.composer-form :deep(.el-form-item) {
+  margin-bottom: 14px;
+}
+
+.composer-form :deep(.el-textarea__inner) {
+  min-height: 112px !important;
+  border-radius: 14px;
+}
+
+.composer-form :deep(.el-input-number) {
+  width: 100%;
+  max-width: 168px;
 }
 
 @media (max-width: 768px) {
@@ -356,7 +358,7 @@ const handleSubmit = async () => {
   }
 
   .dialog-header h3 {
-    font-size: 24px;
+    font-size: 22px;
   }
 }
 </style>
