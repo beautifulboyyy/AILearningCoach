@@ -157,35 +157,89 @@ async def test_update_status_task_not_found(service, mock_db):
 
 @pytest.mark.asyncio
 async def test_submit_feedback_with_text(service, mock_db):
-    """测试提交具体反馈"""
+    """测试提交具体反馈会重新生成分析师并继续等待确认"""
     mock_task = MagicMock()
+    mock_task.thread_id = "research_123"
+    mock_task.topic = "测试主题"
+    mock_task.max_analysts = 3
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_task
     mock_db.execute.return_value = mock_result
 
     with patch("app.ai.deep_research.service.research_graph") as mock_graph:
+        mock_graph.invoke.return_value = {
+            "__interrupt__": [{"value": {"analysts": [{"name": "A", "affiliation": "Org", "role": "R", "description": "D"}]}}]
+        }
+        mock_graph.get_state.return_value = MagicMock(
+            values={
+                "analysts": [{"name": "A", "affiliation": "Org", "role": "R", "description": "D"}]
+            }
+        )
+        service.update_task_status = AsyncMock()
+
         result = await service.submit_feedback("research_123", "请增加技术视角")
 
-    assert result["status"] == "continued"
-    mock_graph.update_state.assert_called_once()
-    call_args = mock_graph.update_state.call_args
-    assert call_args[0][1]["human_analyst_feedback"] == "请增加技术视角"
+    assert result["status"] == "awaiting_feedback"
+    assert result["analysts"][0]["name"] == "A"
+    command = mock_graph.invoke.call_args.args[0]
+    assert command.resume["action"] == "regenerate"
+    assert command.resume["feedback"] == "请增加技术视角"
+    service.update_task_status.assert_awaited_with("research_123", ResearchStatus.AWAITING_FEEDBACK)
 
 
 @pytest.mark.asyncio
 async def test_submit_feedback_empty_continues(service, mock_db):
-    """测试空反馈继续执行"""
+    """测试确认满意后继续执行研究"""
     mock_task = MagicMock()
+    mock_task.thread_id = "research_123"
+    mock_task.topic = "测试主题"
+    mock_task.max_analysts = 3
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_task
     mock_db.execute.return_value = mock_result
 
+    service._handle_graph_result = AsyncMock(return_value={"status": "completed", "thread_id": "research_123"})
+
     with patch("app.ai.deep_research.service.research_graph") as mock_graph:
+        mock_graph.invoke.return_value = {"final_report": "# 报告", "sections": ["A"]}
         result = await service.submit_feedback("research_123", None)
 
-    assert result["status"] == "continued"
-    call_args = mock_graph.update_state.call_args
-    assert call_args[0][1]["human_analyst_feedback"] is None
+    assert result["status"] == "completed"
+    command = mock_graph.invoke.call_args.args[0]
+    assert command.resume["action"] == "approve"
+    service._handle_graph_result.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_analysts_sets_awaiting_feedback(service, mock_db):
+    """测试生成分析师后任务进入等待反馈状态"""
+    mock_task = MagicMock()
+    mock_task.thread_id = "research_123"
+    mock_task.topic = "测试主题"
+    mock_task.max_analysts = 2
+    mock_task.analysts_config = {}
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_task
+    mock_db.execute.return_value = mock_result
+    service.update_task_status = AsyncMock()
+
+    with patch("app.ai.deep_research.service.research_graph") as mock_graph:
+        mock_graph.invoke.return_value = {
+            "__interrupt__": [{"value": {"analysts": [{"name": "A", "affiliation": "Org", "role": "R", "description": "D"}]}}]
+        }
+        mock_graph.get_state.return_value = MagicMock(
+            values={
+                "analysts": [{"name": "A", "affiliation": "Org", "role": "R", "description": "D"}]
+            }
+        )
+
+        result = await service.generate_analysts("research_123")
+
+    assert result["status"] == "awaiting_feedback"
+    assert result["thread_id"] == "research_123"
+    assert result["analysts"][0]["name"] == "A"
+    service.update_task_status.assert_awaited_with("research_123", ResearchStatus.AWAITING_FEEDBACK)
+    assert mock_task.analysts_config["analysts"][0]["name"] == "A"
 
 
 def test_classify_event_create_analysts(service):
@@ -243,8 +297,11 @@ async def test_run_research_sync_marks_completed_with_report(service):
 
     assert result == {
         "status": "completed",
+        "thread_id": "research_123",
+        "message": "研究完成",
         "final_report": "# 报告",
         "sections_count": 2,
+        "error": "",
     }
     assert service.update_task_status.await_args_list[0].args[1] == ResearchStatus.RUNNING
     assert service.update_task_status.await_args_list[-1].args[1] == ResearchStatus.COMPLETED

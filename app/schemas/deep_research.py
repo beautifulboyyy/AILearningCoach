@@ -1,6 +1,6 @@
 """Deep Research Pydantic Schemas"""
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from uuid import UUID
 
@@ -30,13 +30,35 @@ class ResearchTaskResponse(BaseModel):
     status: str
     max_analysts: int
     max_turns: int
+    analysts: Optional[List[AnalystSchema]] = None
     final_report: Optional[str]
     created_at: datetime
     updated_at: datetime
 
+
+class GenerateAnalystsResponse(BaseModel):
+    """生成分析师后的响应"""
+    status: str
+    thread_id: str
+    analysts: List[AnalystSchema]
+    interrupt_required: bool = True
+
+
 class HumanFeedbackRequest(BaseModel):
     """人类反馈请求"""
-    feedback: Optional[str] = None  # None表示确认满意，继续执行
+    action: Literal["approve", "regenerate"]
+    feedback: Optional[str] = None
+
+
+class TaskOperationResponse(BaseModel):
+    """任务操作响应"""
+    status: str
+    thread_id: str
+    message: str = ""
+    analysts: Optional[List[AnalystSchema]] = None
+    final_report: str = ""
+    sections_count: int = 0
+    error: str = ""
 
 
 class SSEResponse(BaseModel):

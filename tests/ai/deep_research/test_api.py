@@ -22,7 +22,7 @@ class TestDeepResearchAPI:
             mock_instance.list_tasks = AsyncMock(return_value=[])
             mock_service.return_value = mock_instance
 
-            response = client.get("/api/v1/deep-research")
+            response = client.get("/api/v1/deep-research/tasks")
 
             assert response.status_code == 200
             assert response.json() == []
@@ -46,7 +46,7 @@ class TestDeepResearchAPI:
             mock_service.return_value = mock_instance
 
             response = client.post(
-                "/api/v1/deep-research/start",
+                "/api/v1/deep-research/tasks",
                 json={"topic": "LangGraph优势分析", "max_analysts": 3}
             )
 
@@ -67,6 +67,7 @@ class TestDeepResearchAPI:
             mock_task.status = "running"
             mock_task.max_analysts = 3
             mock_task.max_turns = 3
+            mock_task.analysts_config = {"analysts": []}
             mock_task.final_report = None
             mock_task.created_at = "2026-03-25T10:00:00"
             mock_task.updated_at = "2026-03-25T10:00:00"
@@ -74,7 +75,7 @@ class TestDeepResearchAPI:
             mock_instance.get_task_by_thread_id = AsyncMock(return_value=mock_task)
             mock_service.return_value = mock_instance
 
-            response = client.get("/api/v1/deep-research/test-thread-123")
+            response = client.get("/api/v1/deep-research/tasks/test-thread-123")
 
             assert response.status_code == 200
             data = response.json()
@@ -88,26 +89,50 @@ class TestDeepResearchAPI:
             mock_instance.get_task_by_thread_id = AsyncMock(return_value=None)
             mock_service.return_value = mock_instance
 
-            response = client.get("/api/v1/deep-research/nonexistent-thread")
+            response = client.get("/api/v1/deep-research/tasks/nonexistent-thread")
 
             assert response.status_code == 404
+
+    def test_generate_analysts(self, client):
+        """测试生成分析师流程"""
+        with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
+            mock_instance = MagicMock()
+            mock_task = MagicMock()
+            mock_instance.get_task_by_thread_id = AsyncMock(return_value=mock_task)
+            mock_instance.generate_analysts = AsyncMock(return_value={
+                "status": "awaiting_feedback",
+                "thread_id": "test-thread-123",
+                "analysts": [{"name": "A", "affiliation": "Org", "role": "R", "description": "D"}],
+                "interrupt_required": True,
+            })
+            mock_service.return_value = mock_instance
+
+            response = client.post("/api/v1/deep-research/tasks/test-thread-123/analysts")
+
+            assert response.status_code == 200
+            assert response.json()["status"] == "awaiting_feedback"
 
     def test_submit_feedback(self, client):
         """测试提交人类反馈"""
         with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
             mock_instance = MagicMock()
             mock_task = MagicMock()
-            mock_task.get_task_by_thread_id = AsyncMock(return_value=mock_task)
             mock_instance.get_task_by_thread_id = AsyncMock(return_value=mock_task)
-            mock_instance.submit_feedback = AsyncMock(return_value={"status": "feedback_submitted"})
+            mock_instance.submit_feedback = AsyncMock(return_value={
+                "status": "awaiting_feedback",
+                "thread_id": "test-thread-123",
+                "analysts": [{"name": "A", "affiliation": "Org", "role": "R", "description": "D"}],
+                "message": "已根据反馈重新生成分析师",
+            })
             mock_service.return_value = mock_instance
 
             response = client.post(
-                "/api/v1/deep-research/test-thread-123/feedback",
-                json={"feedback": "请增加更多技术视角的分析"}
+                "/api/v1/deep-research/tasks/test-thread-123/feedback",
+                json={"action": "regenerate", "feedback": "请增加更多技术视角的分析"}
             )
 
             assert response.status_code == 200
+            assert response.json()["status"] == "awaiting_feedback"
 
     def test_cancel_research(self, client):
         """测试取消研究任务"""
@@ -118,7 +143,7 @@ class TestDeepResearchAPI:
             mock_instance.update_task_status = AsyncMock(return_value=True)
             mock_service.return_value = mock_instance
 
-            response = client.delete("/api/v1/deep-research/test-thread-123")
+            response = client.delete("/api/v1/deep-research/tasks/test-thread-123")
 
             assert response.status_code == 200
             assert response.json()["status"] == "cancelled"
@@ -130,7 +155,7 @@ class TestDeepResearchAPI:
             mock_instance.get_task_by_thread_id = AsyncMock(return_value=None)
             mock_service.return_value = mock_instance
 
-            response = client.delete("/api/v1/deep-research/nonexistent-thread")
+            response = client.delete("/api/v1/deep-research/tasks/nonexistent-thread")
 
             assert response.status_code == 404
 

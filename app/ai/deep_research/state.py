@@ -1,6 +1,6 @@
 """Deep Research 状态定义"""
 import operator
-from typing import Annotated, List, TypedDict
+from typing import Annotated, List, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage
 
@@ -17,7 +17,7 @@ class GenerateAnalystsState(TypedDict):
     """分析师生成状态"""
     topic: str
     max_analysts: int
-    human_analyst_feedback: str
+    human_analyst_feedback: Optional[str]
     analysts: List[Analyst]
 
 
@@ -35,7 +35,7 @@ class ResearchGraphState(TypedDict):
     """主图状态"""
     topic: str
     max_analysts: int
-    human_analyst_feedback: str
+    human_analyst_feedback: Optional[str]
     analysts: List[Analyst]
     sections: Annotated[list, operator.add]
     introduction: str

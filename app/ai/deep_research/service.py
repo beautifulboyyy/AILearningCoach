@@ -1,11 +1,13 @@
 """Deep Research 服务层"""
 import uuid
 import asyncio
+from copy import deepcopy
 import json
 from typing import AsyncGenerator, Dict, Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from langgraph.types import Command
 
 from app.models.research_task import ResearchTask, ResearchStatus
 from app.schemas.deep_research import StartResearchRequest
@@ -30,7 +32,10 @@ class DeepResearchService:
             status=ResearchStatus.PENDING,
             max_analysts=request.max_analysts,
             max_turns=self.config.max_turns,
-            analysts_config={"directions": request.analyst_directions}
+            analysts_config={
+                "directions": request.analyst_directions or [],
+                "analysts": [],
+            }
         )
 
         self.db.add(task)
@@ -64,28 +69,127 @@ class DeepResearchService:
                 task.final_report = final_report
             await self.db.commit()
 
-    async def submit_feedback(self, thread_id: str, feedback: Optional[str]) -> Dict[str, Any]:
-        """提交人类反馈并继续执行"""
+    def _extract_analysts(self, task: ResearchTask) -> list[dict]:
+        """从任务配置中提取分析师快照"""
+        config = task.analysts_config or {}
+        return config.get("analysts", [])
+
+    def _store_analysts(self, task: ResearchTask, analysts: list[dict]):
+        """将最新分析师快照写回任务配置"""
+        config = deepcopy(task.analysts_config or {})
+        config["analysts"] = analysts
+        task.analysts_config = config
+
+    async def _handle_graph_result(self, thread_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
+        """统一处理图执行结果"""
+        if not result:
+            await self.update_task_status(thread_id, ResearchStatus.FAILED)
+            return {
+                "status": "failed",
+                "thread_id": thread_id,
+                "message": "研究图未返回结果",
+                "error": "Graph returned None",
+                "final_report": "",
+                "sections_count": 0,
+            }
+
+        if "__interrupt__" in result:
+            state = research_graph.get_state({"configurable": {"thread_id": thread_id}})
+            analysts = state.values.get("analysts", [])
+            task = await self.get_task_by_thread_id(thread_id)
+            if task:
+                self._store_analysts(task, analysts)
+                await self.update_task_status(thread_id, ResearchStatus.AWAITING_FEEDBACK)
+            return {
+                "status": "awaiting_feedback",
+                "thread_id": thread_id,
+                "message": "请确认分析师或提供新的自然语言要求",
+                "analysts": analysts,
+                "final_report": "",
+                "sections_count": 0,
+                "error": "",
+            }
+
+        final_report = result.get("final_report", "")
+        sections_count = len(result.get("sections", []))
+
+        if not final_report.strip():
+            await self.update_task_status(thread_id, ResearchStatus.FAILED)
+            return {
+                "status": "failed",
+                "thread_id": thread_id,
+                "message": "研究图未生成有效报告",
+                "error": "Graph returned empty final_report",
+                "final_report": "",
+                "sections_count": sections_count,
+            }
+
+        await self.update_task_status(
+            thread_id,
+            ResearchStatus.COMPLETED,
+            final_report=final_report,
+        )
+        return {
+            "status": "completed",
+            "thread_id": thread_id,
+            "message": "研究完成",
+            "final_report": final_report,
+            "sections_count": sections_count,
+            "error": "",
+        }
+
+    async def generate_analysts(self, thread_id: str) -> Dict[str, Any]:
+        """生成分析师并在确认节点中断"""
+        task = await self.get_task_by_thread_id(thread_id)
+        if not task:
+            raise ValueError("任务不存在")
+
         config = {"configurable": {"thread_id": thread_id}}
+        initial_state = {
+            "topic": task.topic,
+            "max_analysts": task.max_analysts,
+            "human_analyst_feedback": "",
+        }
+
+        result = research_graph.invoke(initial_state, config)
+        handled = await self._handle_graph_result(thread_id, result)
+        return {
+            "status": handled["status"],
+            "thread_id": thread_id,
+            "analysts": handled.get("analysts", []),
+            "interrupt_required": handled["status"] == "awaiting_feedback",
+        }
+
+    async def submit_feedback(self, thread_id: str, feedback: Optional[str]) -> Dict[str, Any]:
+        """提交人类反馈并继续执行或重新生成分析师"""
+        config = {"configurable": {"thread_id": thread_id}}
+        task = await self.get_task_by_thread_id(thread_id)
+        if not task:
+            raise ValueError("任务不存在")
 
         if feedback:
-            research_graph.update_state(
+            result = research_graph.invoke(
+                Command(resume={"action": "regenerate", "feedback": feedback}),
                 config,
-                {"human_analyst_feedback": feedback},
-                as_node="human_feedback"
             )
-        else:
-            research_graph.update_state(
-                config,
-                {"human_analyst_feedback": None},
-                as_node="human_feedback"
-            )
+            handled = await self._handle_graph_result(thread_id, result)
+            return {
+                "status": handled["status"],
+                "thread_id": thread_id,
+                "message": "已根据反馈重新生成分析师",
+                "analysts": handled.get("analysts", []),
+                "final_report": "",
+                "sections_count": 0,
+                "error": "",
+            }
 
-        task = await self.get_task_by_thread_id(thread_id)
-        if task:
-            await self.update_task_status(thread_id, ResearchStatus.RUNNING)
-
-        return {"status": "continued"}
+        await self.update_task_status(thread_id, ResearchStatus.RUNNING)
+        result = research_graph.invoke(
+            Command(resume={"action": "approve"}),
+            config,
+        )
+        handled = await self._handle_graph_result(thread_id, result)
+        return handled
 
     async def run_research_sync(self, thread_id: str, topic: str, max_analysts: int) -> Dict[str, Any]:
         """同步运行研究工作流，直接返回完整结果（无流式输出）"""
@@ -108,40 +212,17 @@ class DeepResearchService:
             # 在线程池中执行同步的 graph.invoke()
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, _invoke_graph)
-
-            if not result:
-                await self.update_task_status(thread_id, ResearchStatus.FAILED)
-                return {"status": "failed", "error": "Graph returned None", "final_report": "", "sections_count": 0}
-
-            final_report = result.get("final_report", "")
-            sections_count = len(result.get("sections", []))
-
-            if not final_report.strip():
-                await self.update_task_status(thread_id, ResearchStatus.FAILED)
-                return {
-                    "status": "failed",
-                    "error": "Graph returned empty final_report",
-                    "final_report": "",
-                    "sections_count": sections_count,
-                }
-
-            await self.update_task_status(
-                thread_id,
-                ResearchStatus.COMPLETED,
-                final_report=final_report
-            )
-
-            return {
-                "status": "completed",
-                "final_report": final_report,
-                "sections_count": sections_count
-            }
+            return await self._handle_graph_result(thread_id, result)
 
         except Exception as e:
             await self.update_task_status(thread_id, ResearchStatus.FAILED)
             return {
                 "status": "failed",
-                "error": str(e)
+                "thread_id": thread_id,
+                "message": "研究执行失败",
+                "error": str(e),
+                "final_report": "",
+                "sections_count": 0,
             }
 
     async def run_research(self, thread_id: str, topic: str, max_analysts: int) -> AsyncGenerator[Dict[str, Any], None]:

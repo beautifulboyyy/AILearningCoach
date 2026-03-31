@@ -11,6 +11,7 @@ from app.db.base import Base
 
 class ResearchStatus(str, PyEnum):
     PENDING = "pending"
+    AWAITING_FEEDBACK = "awaiting_feedback"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"

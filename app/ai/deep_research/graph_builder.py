@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 
 from app.ai.deep_research.state import InterviewState, ResearchGraphState
 from app.ai.deep_research.nodes import (
-    create_analysts, generate_question, search_web, search_bocha,
+    create_analysts, human_feedback, generate_question, search_web, search_bocha,
     generate_answer, route_messages, save_interview, write_section,
     write_report, write_introduction, write_conclusion, finalize_report
 )
@@ -45,11 +45,7 @@ def build_interview_subgraph():
 
 def initiate_all_interviews(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     """启动所有并行访谈 - Map步骤"""
-    feedback = state.get("human_analyst_feedback")
     analysts = state.get("analysts")
-
-    if feedback:
-        return "create_analysts"
 
     # 注意：不要在这里添加 if not analysts 检查！
     # 如果 analysts 为空，应该返回空的 Send 列表，让 graph 自然结束
@@ -74,7 +70,8 @@ def build_research_graph():
     builder = StateGraph(ResearchGraphState)
 
     builder.add_node("create_analysts", create_analysts)
-    builder.add_node("human_feedback", lambda state: None)
+    builder.add_node("human_feedback", human_feedback)
+    builder.add_node("dispatch_interviews", lambda state: {})
     builder.add_node("conduct_interview", interview_graph)
     builder.add_node("write_report", write_report)
     builder.add_node("write_introduction", write_introduction)
@@ -85,9 +82,9 @@ def build_research_graph():
     builder.add_edge("create_analysts", "human_feedback")
 
     builder.add_conditional_edges(
-        "human_feedback",
+        "dispatch_interviews",
         initiate_all_interviews,
-        ["create_analysts", "conduct_interview"]
+        ["conduct_interview"]
     )
 
     builder.add_edge("conduct_interview", "write_report")

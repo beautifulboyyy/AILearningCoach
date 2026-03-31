@@ -1,8 +1,8 @@
 """Deep Research 节点函数"""
-from typing import Dict, Any, List, Annotated
+from typing import Dict, Any, List, Literal
 from pydantic import BaseModel, Field
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, get_buffer_string
-from langchain_core.output_parsers import JsonOutputParser
+from langgraph.types import Command, interrupt
 
 from app.ai.deep_research.llm import get_llm
 from app.ai.deep_research.prompts import (
@@ -71,6 +71,31 @@ def create_analysts(state: Dict[str, Any]) -> Dict[str, Any]:
 
     # 转换为字典以兼容checkpoint序列化
     return {"analysts": [a.model_dump() if hasattr(a, 'model_dump') else a for a in analysts]}
+
+
+def human_feedback(state: Dict[str, Any]) -> Command[Literal["create_analysts", "dispatch_interviews"]]:
+    """在分析师生成后暂停，等待用户确认或要求重新生成"""
+    response = interrupt(
+        {
+            "type": "analyst_review",
+            "topic": state["topic"],
+            "max_analysts": state["max_analysts"],
+            "analysts": state.get("analysts", []),
+        }
+    )
+
+    action = (response or {}).get("action", "approve")
+    if action == "regenerate":
+        feedback = (response or {}).get("feedback", "")
+        return Command(
+            update={"human_analyst_feedback": feedback},
+            goto="create_analysts",
+        )
+
+    return Command(
+        update={"human_analyst_feedback": None},
+        goto="dispatch_interviews",
+    )
 
 
 def generate_question(state: Dict[str, Any]) -> Dict[str, Any]:

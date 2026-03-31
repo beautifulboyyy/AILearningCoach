@@ -4,29 +4,40 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
 from app.schemas.deep_research import (
-    StartResearchRequest, ResearchTaskResponse,
-    HumanFeedbackRequest
+    StartResearchRequest,
+    ResearchTaskResponse,
+    HumanFeedbackRequest,
+    GenerateAnalystsResponse,
+    TaskOperationResponse,
 )
 from app.ai.deep_research.service import DeepResearchService
 
 
 router = APIRouter()
 
+def _task_to_response(task) -> ResearchTaskResponse:
+    analysts = []
+    if getattr(task, "analysts_config", None):
+        analysts = (task.analysts_config or {}).get("analysts", [])
+    return ResearchTaskResponse(
+        id=task.id,
+        thread_id=task.thread_id,
+        topic=task.topic,
+        status=task.status,
+        max_analysts=task.max_analysts,
+        max_turns=task.max_turns,
+        analysts=analysts or None,
+        final_report=task.final_report,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+    )
 
-class ExecuteResearchResponse(BaseModel):
-    """同步执行研究任务的响应"""
-    status: str
-    final_report: str = ""
-    sections_count: int = 0
-    error: str = ""
 
-
-@router.post("/start", response_model=ResearchTaskResponse)
+@router.post("/tasks", response_model=ResearchTaskResponse)
 async def start_research(
     request: StartResearchRequest,
     db: AsyncSession = Depends(get_db)
@@ -35,10 +46,10 @@ async def start_research(
     service = DeepResearchService(db)
     task = await service.create_task(request)
 
-    return ResearchTaskResponse.model_validate(task)
+    return _task_to_response(task)
 
 
-@router.get("", response_model=List[ResearchTaskResponse])
+@router.get("/tasks", response_model=List[ResearchTaskResponse])
 async def list_research_tasks(
     limit: int = 50,
     db: AsyncSession = Depends(get_db)
@@ -46,10 +57,10 @@ async def list_research_tasks(
     """获取研究任务列表"""
     service = DeepResearchService(db)
     tasks = await service.list_tasks(limit)
-    return [ResearchTaskResponse.model_validate(t) for t in tasks]
+    return [_task_to_response(t) for t in tasks]
 
 
-@router.get("/{thread_id}", response_model=ResearchTaskResponse)
+@router.get("/tasks/{thread_id}", response_model=ResearchTaskResponse)
 async def get_research_task(
     thread_id: str,
     db: AsyncSession = Depends(get_db)
@@ -61,35 +72,26 @@ async def get_research_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    return ResearchTaskResponse.model_validate(task)
+    return _task_to_response(task)
 
 
-@router.post("/{thread_id}/execute", response_model=ExecuteResearchResponse)
-async def execute_research(
+@router.post("/tasks/{thread_id}/analysts", response_model=GenerateAnalystsResponse)
+async def generate_analysts(
     thread_id: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """同步执行研究任务，等待完成后返回完整报告
-
-    这是推荐使用的端点，不需要流式处理，
-    只需一个按钮点击后展示完整报告即可。
-    """
+    """生成分析师并进入人类反馈中断"""
     service = DeepResearchService(db)
 
     task = await service.get_task_by_thread_id(thread_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    result = await service.run_research_sync(
-        thread_id,
-        task.topic,
-        task.max_analysts
-    )
-
-    return ExecuteResearchResponse(**result)
+    result = await service.generate_analysts(thread_id)
+    return GenerateAnalystsResponse(**result)
 
 
-@router.post("/{thread_id}/feedback")
+@router.post("/tasks/{thread_id}/feedback", response_model=TaskOperationResponse)
 async def submit_feedback(
     thread_id: str,
     request: HumanFeedbackRequest,
@@ -102,11 +104,12 @@ async def submit_feedback(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    result = await service.submit_feedback(thread_id, request.feedback)
-    return result
+    feedback = request.feedback if request.action == "regenerate" else None
+    result = await service.submit_feedback(thread_id, feedback)
+    return TaskOperationResponse(**result)
 
 
-@router.delete("/{thread_id}")
+@router.delete("/tasks/{thread_id}")
 async def cancel_research(
     thread_id: str,
     db: AsyncSession = Depends(get_db)
@@ -122,6 +125,21 @@ async def cancel_research(
     await service.update_task_status(thread_id, ResearchStatus.CANCELLED)
 
     return {"status": "cancelled"}
+
+
+@router.post("/tasks/{thread_id}/execute", response_model=TaskOperationResponse)
+async def execute_research(
+    thread_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """兼容旧调用：直接执行任务，若未确认分析师则返回等待反馈状态"""
+    service = DeepResearchService(db)
+    task = await service.get_task_by_thread_id(thread_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    result = await service.run_research_sync(thread_id, task.topic, task.max_analysts)
+    return TaskOperationResponse(**result)
 
 
 @router.get("/{thread_id}/events")
