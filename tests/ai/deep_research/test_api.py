@@ -144,6 +144,7 @@ class TestDeepResearchAPI:
         with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
             mock_instance = MagicMock()
             mock_task = MagicMock()
+            mock_task.status = "awaiting_feedback"
             mock_instance.get_task_by_thread_id = AsyncMock(return_value=mock_task)
             mock_instance.submit_feedback = AsyncMock(return_value={
                 "status": "awaiting_feedback",
@@ -160,6 +161,31 @@ class TestDeepResearchAPI:
 
             assert response.status_code == 200
             assert response.json()["status"] == "awaiting_feedback"
+
+    def test_submit_feedback_requires_feedback_when_regenerate(self, client):
+        """测试重新生成分析师时必须提供自然语言反馈"""
+        response = client.post(
+            "/api/v1/deep-research/tasks/test-thread-123/feedback",
+            json={"action": "regenerate"}
+        )
+
+        assert response.status_code == 422
+
+    def test_submit_feedback_requires_awaiting_feedback_status(self, client):
+        """测试只有等待反馈状态的任务才允许提交反馈"""
+        with patch("app.api.v1.endpoints.deep_research.DeepResearchService") as mock_service:
+            mock_instance = MagicMock()
+            mock_task = MagicMock()
+            mock_task.status = "pending"
+            mock_instance.get_task_by_thread_id = AsyncMock(return_value=mock_task)
+            mock_service.return_value = mock_instance
+
+            response = client.post(
+                "/api/v1/deep-research/tasks/test-thread-123/feedback",
+                json={"action": "approve"}
+            )
+
+            assert response.status_code == 409
 
     def test_cancel_research(self, client):
         """测试删除研究任务"""

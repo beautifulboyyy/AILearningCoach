@@ -1,7 +1,7 @@
 """Deep Research Pydantic Schemas"""
 from datetime import datetime
 from typing import List, Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from uuid import UUID
 
 
@@ -48,6 +48,13 @@ class HumanFeedbackRequest(BaseModel):
     """人类反馈请求"""
     action: Literal["approve", "regenerate"]
     feedback: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_feedback(self):
+        """重新生成时必须提供自然语言反馈。"""
+        if self.action == "regenerate" and not (self.feedback or "").strip():
+            raise ValueError("feedback is required when action is regenerate")
+        return self
 
 
 class TaskOperationResponse(BaseModel):
