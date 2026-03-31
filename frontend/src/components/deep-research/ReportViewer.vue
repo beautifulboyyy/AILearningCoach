@@ -1,51 +1,103 @@
 <template>
-  <el-card class="panel-card report-card" shadow="never">
-    <template #header>
-      <div class="panel-header">
-        <div>
-          <h3>最终报告</h3>
-          <p>报告内容已从访谈与检索结果中提炼完成。</p>
+  <div class="report-viewer">
+    <div class="report-shell">
+      <div class="report-head">
+        <div class="report-head-main">
+          <div class="report-kicker">Deep Research Report</div>
+          <h1>{{ title }}</h1>
+          <p>{{ subtitle }}</p>
         </div>
-        <div class="anchor-actions">
-          <el-button
-            v-for="item in navItems"
-            :key="item.anchor"
-            text
-            type="primary"
-            @click="scrollTo(item.anchor)"
-          >
-            {{ item.label }}
-          </el-button>
+
+        <div class="report-meta">
+          <div class="meta-item">
+            <span>任务状态</span>
+            <strong>{{ statusText }}</strong>
+          </div>
+          <div class="meta-item">
+            <span>分析师数量</span>
+            <strong>{{ analystsCount }}</strong>
+          </div>
+          <div class="meta-item">
+            <span>最后更新</span>
+            <strong>{{ updatedAtText }}</strong>
+          </div>
         </div>
       </div>
-    </template>
 
-    <div v-if="sections.length > 0" class="report-sections">
-      <section
-        v-for="section in sections"
-        :key="section.anchor"
-        :id="section.anchor"
-        class="report-section"
-      >
-        <div class="section-label">{{ section.label }}</div>
-        <h2>{{ section.title }}</h2>
-        <div class="section-body markdown-body" v-html="section.html"></div>
-      </section>
+      <div v-if="navItems.length > 0" class="report-nav">
+        <button
+          v-for="item in navItems"
+          :key="item.anchor"
+          type="button"
+          class="nav-chip"
+          @click="scrollTo(item.anchor)"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+
+      <div v-if="sections.length > 0" class="report-article">
+        <section
+          v-for="section in sections"
+          :key="section.anchor"
+          :id="section.anchor"
+          class="article-section"
+        >
+          <h2>{{ section.title }}</h2>
+          <div
+            v-if="section.kind === 'citations'"
+            class="citation-section"
+          >
+            <div class="citation-summary">
+              <span>共 {{ section.lines.length }} 条引用</span>
+              <el-button text type="primary" @click="toggleCitations">
+                {{ showAllCitations ? '收起部分引用' : '展开全部引用' }}
+              </el-button>
+            </div>
+            <ul class="citation-list">
+              <li v-for="line in visibleCitationLines" :key="line">
+                <a :href="extractUrl(line)" target="_blank" rel="noreferrer">
+                  {{ line }}
+                </a>
+              </li>
+            </ul>
+          </div>
+
+          <div
+            v-else
+            class="article-body markdown-body"
+            v-html="section.html"
+          ></div>
+        </section>
+      </div>
+
+      <el-empty v-else description="报告生成后会展示在这里" />
     </div>
-
-    <el-empty v-else description="报告生成后会展示在这里" />
-  </el-card>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import dayjs from 'dayjs'
 import MarkdownIt from 'markdown-it'
 
 interface Props {
   report?: string | null
+  title?: string
+  subtitle?: string
+  statusText?: string
+  analystsCount?: number
+  updatedAt?: string
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  report: '',
+  title: '研究报告',
+  subtitle: '完整报告已生成，可在此按论文式连续阅读。',
+  statusText: '已完成',
+  analystsCount: 0,
+  updatedAt: ''
+})
 
 const md = new MarkdownIt({
   html: false,
@@ -53,47 +105,60 @@ const md = new MarkdownIt({
   linkify: true
 })
 
-const detectAnchor = (title: string) => {
-  const normalized = title.trim().toLowerCase()
-  if (normalized.includes('引言') || normalized.includes('introduction')) return 'report-introduction'
-  if (normalized.includes('结论') || normalized.includes('conclusion')) return 'report-conclusion'
+const showAllCitations = ref(false)
+
+const updatedAtText = computed(() => {
+  return props.updatedAt ? dayjs(props.updatedAt).format('YYYY-MM-DD HH:mm:ss') : '暂无'
+})
+
+const normalizeHeading = (title: string) => title.trim().toLowerCase()
+
+const sectionKind = (title: string) => {
+  const normalized = normalizeHeading(title)
   if (
     normalized.includes('引用') ||
     normalized.includes('references') ||
     normalized.includes('sources')
   ) {
-    return 'report-citations'
+    return 'citations'
   }
-  return 'report-content'
+  return 'content'
 }
 
-const sectionLabelMap: Record<string, string> = {
-  'report-introduction': '引言',
-  'report-content': '主体',
-  'report-conclusion': '结论',
-  'report-citations': '引用'
+const baseAnchor = (title: string) => {
+  const normalized = normalizeHeading(title)
+  if (normalized.includes('引言') || normalized.includes('introduction')) return 'introduction'
+  if (normalized.includes('结论') || normalized.includes('conclusion')) return 'conclusion'
+  if (sectionKind(title) === 'citations') return 'citations'
+  return 'content'
 }
 
 const sections = computed(() => {
   const report = (props.report || '').trim()
   if (!report) return []
 
-  const chunks = report
+  const rawSections = report
     .split(/^##\s+/m)
     .map((chunk) => chunk.trim())
     .filter(Boolean)
 
-  return chunks.map((chunk, index) => {
+  return rawSections.map((chunk, index) => {
     const [titleLine, ...contentLines] = chunk.split('\n')
     const title = titleLine.trim()
-    const baseAnchor = detectAnchor(title)
-    const anchor = index === 0 && baseAnchor === 'report-content' ? 'report-introduction-0' : `${baseAnchor}-${index}`
+    const kind = sectionKind(title)
+    const content = contentLines.join('\n').trim()
 
     return {
-      anchor,
-      label: sectionLabelMap[baseAnchor] || '内容',
+      anchor: `${baseAnchor(title)}-${index}`,
+      kind,
       title,
-      html: md.render(contentLines.join('\n').trim())
+      html: kind === 'citations' ? '' : md.render(content),
+      lines: kind === 'citations'
+        ? content
+            .split('\n')
+            .map((line) => line.replace(/^[-*\d.\s]+/, '').trim())
+            .filter(Boolean)
+        : []
     }
   })
 })
@@ -101,9 +166,27 @@ const sections = computed(() => {
 const navItems = computed(() => {
   return sections.value.map((section) => ({
     anchor: section.anchor,
-    label: section.label
+    label: section.title
   }))
 })
+
+const citationSection = computed(() => {
+  return sections.value.find((section) => section.kind === 'citations')
+})
+
+const visibleCitationLines = computed(() => {
+  const lines = citationSection.value?.lines || []
+  return showAllCitations.value ? lines : lines.slice(0, 8)
+})
+
+const extractUrl = (line: string) => {
+  const match = line.match(/https?:\/\/\S+/)
+  return match?.[0] || '#'
+}
+
+const toggleCitations = () => {
+  showAllCitations.value = !showAllCitations.value
+}
 
 const scrollTo = (anchor: string) => {
   const element = document.getElementById(anchor)
@@ -113,80 +196,202 @@ const scrollTo = (anchor: string) => {
 </script>
 
 <style scoped lang="scss">
-.report-card {
-  border: none;
-  background: #fffdfa;
+.report-viewer {
+  min-height: 100%;
+  padding: 20px 0 36px;
 }
 
-.panel-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+.report-shell {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top right, rgba(90, 138, 255, 0.1), transparent 24%),
+    linear-gradient(180deg, #fffefb 0%, #faf6ee 100%);
+  box-shadow: 0 24px 60px rgba(15, 38, 60, 0.08);
+}
 
-  h3 {
-    margin: 0;
-    color: #17324d;
+.report-head {
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(23, 50, 77, 0.08);
+}
+
+.report-head-main {
+  flex: 1;
+
+  h1 {
+    margin: 10px 0 12px;
+    color: #16314c;
+    font-size: 40px;
+    line-height: 1.2;
   }
 
   p {
-    margin: 8px 0 0;
+    margin: 0;
     color: #6f8096;
+    line-height: 1.7;
+    font-size: 15px;
   }
 }
 
-.anchor-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.report-sections {
-  display: grid;
-  gap: 20px;
-}
-
-.report-section {
-  padding: 24px;
-  border-radius: 18px;
-  border: 1px solid #ece7dd;
-  background: #fff;
-  box-shadow: 0 10px 30px rgba(17, 43, 67, 0.04);
-
-  h2 {
-    margin: 10px 0 18px;
-    color: #1a3652;
-    font-size: 24px;
-  }
-}
-
-.section-label {
+.report-kicker {
   display: inline-flex;
-  align-items: center;
   padding: 6px 10px;
   border-radius: 999px;
-  background: #f2f6fb;
-  color: #65809b;
+  background: #eef4ff;
+  color: #4a6ca6;
   font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.section-body {
+.report-meta {
+  min-width: 280px;
+  display: grid;
+  gap: 12px;
+}
+
+.meta-item {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(23, 50, 77, 0.07);
+
+  span {
+    display: block;
+    color: #7688a0;
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+
+  strong {
+    color: #17324d;
+    font-size: 15px;
+  }
+}
+
+.report-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.nav-chip {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: #f0f4fa;
+  color: #38597a;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: #dde9ff;
+    color: #24476d;
+  }
+}
+
+.report-article {
+  padding: 36px 56px;
+  border-radius: 24px;
+  background: #fff;
+  border: 1px solid rgba(23, 50, 77, 0.06);
+}
+
+.article-section + .article-section {
+  margin-top: 40px;
+}
+
+.article-section h2 {
+  margin: 0 0 18px;
+  color: #17324d;
+  font-size: 28px;
+}
+
+.article-body {
   color: #294767;
-  line-height: 1.8;
+  font-size: 16px;
+  line-height: 1.9;
 }
 
 .markdown-body :deep(p),
-.markdown-body :deep(li) {
-  line-height: 1.8;
+.markdown-body :deep(li),
+.markdown-body :deep(blockquote) {
+  line-height: 1.9;
 }
 
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
-  padding-left: 20px;
+  padding-left: 22px;
 }
 
 .markdown-body :deep(a) {
   color: #2f67d7;
   word-break: break-all;
+}
+
+.citation-section {
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid #e7edf5;
+}
+
+.citation-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #627892;
+  font-size: 13px;
+}
+
+.citation-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+
+  a {
+    color: #2f67d7;
+    word-break: break-all;
+    line-height: 1.7;
+  }
+}
+
+@media (max-width: 980px) {
+  .report-shell {
+    padding: 20px;
+  }
+
+  .report-head {
+    flex-direction: column;
+  }
+
+  .report-meta {
+    min-width: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .report-article {
+    padding: 24px 20px;
+  }
+}
+
+@media (max-width: 720px) {
+  .report-head-main h1 {
+    font-size: 30px;
+  }
+
+  .report-meta {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

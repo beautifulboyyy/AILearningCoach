@@ -58,6 +58,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Deep Research' }
       },
       {
+        path: 'deep-research/:threadId/report',
+        name: 'DeepResearchReport',
+        component: () => import('@/views/deep-research/DeepResearchReportView.vue'),
+        meta: { title: '研究报告' }
+      },
+      {
         path: 'progress',
         name: 'Progress',
         component: () => import('@/views/progress/ProgressView.vue'),

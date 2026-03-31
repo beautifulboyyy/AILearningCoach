@@ -65,10 +65,35 @@
           </div>
         </el-card>
 
-        <ReportViewer
+        <el-card
           v-if="store.currentTask.status === 'completed' || !!store.currentTask.final_report"
-          :report="store.currentTask.final_report"
-        />
+          class="completed-card"
+          shadow="never"
+        >
+          <div class="completed-state">
+            <div class="completed-main">
+              <div class="pending-badge">Report Ready</div>
+              <h3>研究任务已经完成</h3>
+              <p>
+                工作台保留任务状态、摘要和操作入口。完整报告将进入独立阅读页，以连续长文形式展示，更适合后续深入阅读。
+              </p>
+            </div>
+
+            <div class="completed-side">
+              <div class="completed-meta">
+                <span>当前状态</span>
+                <strong>{{ statusLabelMap[store.currentTask.status] }}</strong>
+              </div>
+              <div class="completed-meta">
+                <span>报告摘要</span>
+                <p>{{ reportSummary }}</p>
+              </div>
+              <el-button type="primary" size="large" @click="handleOpenReport">
+                查看完整报告
+              </el-button>
+            </div>
+          </div>
+        </el-card>
       </div>
 
       <el-card v-else class="empty-workspace" shadow="never">
@@ -85,18 +110,34 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
 import ResearchComposer from '@/components/deep-research/ResearchComposer.vue'
 import TaskRail from '@/components/deep-research/TaskRail.vue'
 import TaskHeader from '@/components/deep-research/TaskHeader.vue'
 import AnalystReviewPanel from '@/components/deep-research/AnalystReviewPanel.vue'
 import ResearchProgressPanel from '@/components/deep-research/ResearchProgressPanel.vue'
-import ReportViewer from '@/components/deep-research/ReportViewer.vue'
 import { useDeepResearchStore } from '@/stores/deepResearch'
 import type { StartDeepResearchRequest } from '@/types/deepResearch'
 
+const route = useRoute()
+const router = useRouter()
 const store = useDeepResearchStore()
+
+const statusLabelMap = {
+  pending: '待生成分析师',
+  awaiting_feedback: '等待人工确认',
+  running: '研究进行中',
+  completed: '报告已完成',
+  failed: '执行失败'
+}
+
+const reportSummary = computed(() => {
+  const report = (store.currentTask?.final_report || '').replace(/\s+/g, ' ').trim()
+  if (!report) return '当前任务已完成，可进入独立报告页阅读全文。'
+  return `${report.slice(0, 150)}${report.length > 150 ? '...' : ''}`
+})
 
 const handleCreateTask = async (payload: StartDeepResearchRequest) => {
   try {
@@ -162,8 +203,17 @@ const handleRegenerate = async (feedback: string) => {
   }
 }
 
+const handleOpenReport = () => {
+  if (!store.currentTask?.thread_id) return
+  router.push(`/deep-research/${store.currentTask.thread_id}/report`)
+}
+
 onMounted(async () => {
   await store.initialize()
+  const threadId = String(route.query.threadId || '')
+  if (threadId) {
+    await store.selectTask(threadId)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -198,6 +248,7 @@ onBeforeUnmount(() => {
 }
 
 .pending-card,
+.completed-card,
 .failed-card,
 .empty-workspace {
   border: none;
@@ -205,6 +256,7 @@ onBeforeUnmount(() => {
 }
 
 .pending-state,
+.completed-state,
 .failed-state,
 .empty-state {
   min-height: 260px;
@@ -232,6 +284,50 @@ onBeforeUnmount(() => {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
+}
+
+.completed-state {
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.completed-main {
+  flex: 1;
+}
+
+.completed-side {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.completed-meta {
+  padding: 16px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #f7f9fd 0%, #fefbf4 100%);
+  border: 1px solid rgba(23, 50, 77, 0.08);
+
+  span {
+    display: block;
+    color: #70839a;
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+
+  strong {
+    color: #17324d;
+    font-size: 16px;
+  }
+
+  p {
+    margin: 0;
+    color: #2e4b68;
+    font-size: 14px;
+    line-height: 1.75;
+  }
 }
 
 .pending-badge,
@@ -262,6 +358,14 @@ onBeforeUnmount(() => {
   .pending-state {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .completed-state {
+    flex-direction: column;
+  }
+
+  .completed-side {
+    width: 100%;
   }
 }
 </style>
