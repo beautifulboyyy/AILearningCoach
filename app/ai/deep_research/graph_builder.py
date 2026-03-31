@@ -1,17 +1,43 @@
 """Deep Research 图构建"""
+import atexit
 from typing import Dict, Any, List
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.types import Send
 
 from langchain_core.messages import HumanMessage
 
+from app.core.config import settings
 from app.ai.deep_research.state import InterviewState, ResearchGraphState
 from app.ai.deep_research.nodes import (
     create_analysts, human_feedback, generate_question, search_web, search_bocha,
     generate_answer, route_messages, save_interview, write_section,
     write_report, write_introduction, write_conclusion, finalize_report
 )
+
+
+_checkpointer_cm = None
+_checkpointer = None
+
+
+def _close_checkpointer():
+    """关闭全局 Postgres checkpointer 连接。"""
+    global _checkpointer_cm, _checkpointer
+    if _checkpointer_cm is not None:
+        _checkpointer_cm.__exit__(None, None, None)
+        _checkpointer_cm = None
+        _checkpointer = None
+
+
+def get_checkpointer() -> PostgresSaver:
+    """获取可跨进程恢复的 LangGraph 持久化 checkpointer。"""
+    global _checkpointer_cm, _checkpointer
+    if _checkpointer is None:
+        _checkpointer_cm = PostgresSaver.from_conn_string(settings.DATABASE_SYNC_URL)
+        _checkpointer = _checkpointer_cm.__enter__()
+        _checkpointer.setup()
+        atexit.register(_close_checkpointer)
+    return _checkpointer
 
 
 def build_interview_subgraph():
@@ -51,8 +77,8 @@ def build_interview_subgraph():
 def dispatch_searches(state: Dict[str, Any]) -> List[Send]:
     """将问题分发到两个并行搜索节点"""
     return [
-        Send("search_web", dict(state)),
-        Send("search_bocha", dict(state)),
+        Send("search_web", {"messages": state.get("messages", [])}),
+        Send("search_bocha", {"messages": state.get("messages", [])}),
     ]
 
 
@@ -77,6 +103,15 @@ def initiate_all_interviews(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     return sends
 
 
+def dispatch_interviews(state: Dict[str, Any]) -> Dict[str, Any]:
+    """保留访谈分发所需的主图字段，供后续条件路由使用"""
+    return {
+        "topic": state["topic"],
+        "max_num_turns": state.get("max_num_turns", 3),
+        "analysts": state.get("analysts", []),
+    }
+
+
 def build_research_graph():
     """构建主研究图"""
     interview_graph = build_interview_subgraph()
@@ -85,7 +120,7 @@ def build_research_graph():
 
     builder.add_node("create_analysts", create_analysts)
     builder.add_node("human_feedback", human_feedback)
-    builder.add_node("dispatch_interviews", lambda state: {})
+    builder.add_node("dispatch_interviews", dispatch_interviews)
     builder.add_node("conduct_interview", interview_graph)
     builder.add_node("write_report", write_report)
     builder.add_node("write_introduction", write_introduction)
@@ -111,9 +146,8 @@ def build_research_graph():
     )
     builder.add_edge("finalize_report", END)
 
-    memory = MemorySaver()
     return builder.compile(
-        checkpointer=memory
+        checkpointer=get_checkpointer()
     )
 
 

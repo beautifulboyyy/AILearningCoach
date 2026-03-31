@@ -1,10 +1,11 @@
 """Bocha 搜索工具"""
-import os
 from typing import List
 
 import httpx
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
+
+from app.core.config import settings
 
 
 class BochaSearchInput(BaseModel):
@@ -24,9 +25,9 @@ class BochaSearchTool(BaseTool):
 
     def _search(self, query: str, count: int = 10, freshness: str = "noLimit", summary: bool = False) -> List[dict]:
         """执行Bocha搜索"""
-        api_key = os.getenv("BOCHA_API_KEY")
+        api_key = settings.BOCHA_API_KEY
         if not api_key:
-            raise ValueError("BOCHA_API_KEY not found in environment")
+            raise ValueError("BOCHA_API_KEY not configured")
 
         url = "https://api.bocha.cn/v1/web-search"
         headers = {
@@ -78,9 +79,9 @@ class BochaSearchTool(BaseTool):
 
     async def _async_search(self, query: str, count: int, freshness: str, summary: bool) -> List[dict]:
         """异步HTTP请求"""
-        api_key = os.getenv("BOCHA_API_KEY")
+        api_key = settings.BOCHA_API_KEY
         if not api_key:
-            raise ValueError("BOCHA_API_KEY not found in environment")
+            raise ValueError("BOCHA_API_KEY not configured")
 
         url = "https://api.bocha.cn/v1/web-search"
         headers = {

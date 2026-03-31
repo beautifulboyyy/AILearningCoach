@@ -5,6 +5,11 @@ from typing import Annotated, List, Optional, TypedDict
 from langchain_core.messages import BaseMessage
 
 
+def keep_latest(_current, new_value):
+    """并行分支合流时保留最新的标量配置值。"""
+    return new_value
+
+
 class Analyst(TypedDict):
     """分析师数据模型"""
     name: str
@@ -35,7 +40,7 @@ class ResearchGraphState(TypedDict):
     """主图状态"""
     topic: str
     max_analysts: int
-    max_num_turns: int
+    max_num_turns: Annotated[int, keep_latest]
     human_analyst_feedback: Optional[str]
     analysts: List[Analyst]
     sections: Annotated[list, operator.add]

@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     def DATABASE_URL(self) -> str:
         """数据库连接URL"""
         return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
+    @property
+    def DATABASE_SYNC_URL(self) -> str:
+        """同步数据库连接URL，供 LangGraph 持久化等同步客户端使用"""
+        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
     
     # Redis配置
     REDIS_HOST: str
