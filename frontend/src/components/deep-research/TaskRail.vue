@@ -2,7 +2,10 @@
   <el-card class="rail-card" shadow="never">
     <template #header>
       <div class="rail-header">
-        <span>任务轨道</span>
+        <div>
+          <span>任务轨道</span>
+          <p>切换任务、查看状态、删除历史任务</p>
+        </div>
         <el-segmented v-model="currentFilter" :options="filterOptions" size="small" />
       </div>
     </template>
@@ -102,54 +105,87 @@ const formatTime = (value: string) => {
 <style scoped lang="scss">
 .rail-card {
   border: none;
-  background: #10263b;
+  height: 100%;
+  background:
+    radial-gradient(circle at top right, rgba(76, 141, 246, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(250, 247, 240, 0.92) 100%);
+  box-shadow: 0 18px 40px rgba(19, 42, 66, 0.08);
 
   :deep(.el-card__header) {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(22, 49, 76, 0.08);
   }
 
   :deep(.el-card__body) {
+    height: calc(100% - 73px);
     padding-top: 16px;
   }
 }
 
 .rail-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  color: #f5f7fa;
+  color: #17324d;
   font-weight: 700;
+
+  p {
+    margin: 6px 0 0;
+    color: #6f8096;
+    font-size: 13px;
+    font-weight: 400;
+  }
 }
 
 .rail-list {
-  display: flex;
-  flex-direction: column;
+  height: 100%;
+  display: grid;
+  align-content: start;
   gap: 12px;
-  min-height: 240px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(76, 141, 246, 0.24);
+    border-radius: 999px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 .task-item {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #f5f7fa;
+  border: 1px solid rgba(22, 49, 76, 0.08);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #17324d;
   text-align: left;
   cursor: pointer;
   transition: all 0.24s ease;
+  box-shadow: 0 12px 24px rgba(20, 44, 70, 0.04);
 
   &:hover {
     transform: translateY(-1px);
-    border-color: rgba(89, 150, 255, 0.45);
-    background: rgba(89, 150, 255, 0.12);
+    border-color: rgba(76, 141, 246, 0.32);
+    background:
+      radial-gradient(circle at top right, rgba(76, 141, 246, 0.12), transparent 30%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(244, 248, 255, 0.95) 100%);
   }
 
   &.active {
-    border-color: #5b8cff;
-    background: linear-gradient(180deg, rgba(91, 140, 255, 0.22), rgba(91, 140, 255, 0.12));
-    box-shadow: 0 18px 30px rgba(6, 18, 34, 0.28);
+    border-color: rgba(76, 141, 246, 0.4);
+    background:
+      radial-gradient(circle at top right, rgba(76, 141, 246, 0.15), transparent 30%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(241, 247, 255, 0.98) 100%);
+    box-shadow: 0 18px 34px rgba(76, 141, 246, 0.12);
   }
 }
 
@@ -163,14 +199,15 @@ const formatTime = (value: string) => {
 
 .task-topic {
   margin: 12px 0;
-  font-size: 14px;
+  font-size: 16px;
+  font-weight: 700;
   line-height: 1.6;
-  color: #f3f6fb;
+  color: #17324d;
 }
 
 .task-time,
 .task-meta span {
-  color: rgba(243, 246, 251, 0.68);
+  color: #72849a;
   font-size: 12px;
 }
 </style>
